@@ -191,7 +191,9 @@ function Download-File {
 
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($curl) {
-        & $curl.Source -L --fail --retry 3 --output $Destination $Url
+        & $curl.Source -L --fail --retry 5 --retry-all-errors --retry-delay 5 `
+            --connect-timeout 30 --speed-limit 10240 --speed-time 60 `
+            --output $Destination $Url
         if ($LASTEXITCODE -ne 0) {
             throw "curl.exe failed to download $Url"
         }

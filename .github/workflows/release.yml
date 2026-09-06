@@ -167,7 +167,11 @@ jobs:
 
       - name: Fetch the media tools
         run: |
-          curl -sSL --fail -o ffmpeg.zip "${{ needs.downloads.outputs.x64 }}"
+          # A large download from a release page stalls now and then; a stalled
+          # one is dropped and started again rather than failing the release.
+          curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 30 --speed-limit 10240 --speed-time 60 \
+            -o ffmpeg.zip "${{ needs.downloads.outputs.x64 }}"
           unzip -q ffmpeg.zip -d ffmpeg
 
       - name: Build the package
