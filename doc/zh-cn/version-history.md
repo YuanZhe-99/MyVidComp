@@ -1,0 +1,40 @@
+# 版本历史
+
+MyVidComp 行为变更的按日期记录。用于在修改前理解*为什么*存在某个行为——若干条目记录的是看似怪癖、实为刻意为之的安全修复。MyVidComp 不使用 semver 版本发布；构建携带 `BUILD_MARKER`，显示在 `--version` 输出中。
+
+## 时间线
+
+- `2026-05-22`: 初始 Rust CLI、配置支持、捆绑运行时查找、AV1 编码器选择、质量估算、验证、进度 UI 和 Windows 打包。
+- `2026-05-22`: 新增 SMB 友好发现、`tmp_dir`、跨设备提交回退、缓存临时文件处理、显式帧率保留和源色彩/像素元数据处理。
+- `2026-05-22`: 收紧输出保留策略，仅主视频编码器允许变化；流数量/顺序/编解码器和像素/显示元数据均被验证。
+- `2026-05-23`: 新增运行时检查的硬件编码器优先级、可配置的编码器覆盖、包校验和、构建标记和 `--version` 输出。
+- `2026-05-23`: 重构流映射为显式源流索引，禁用强制 MP4 章节映射，AV1/MP4 缺失色度位置报告改为提示性，编码前加入缓存临时文件验证。
+- `2026-05-23`: 删除 `PLAN.md`，行为策略并入 `README.md` 与 `AGENTS.md`，拆分二进制入口与核心库，加入 `AI-FUNC-SUMMARY` 注释。
+- `2026-05-23`: 新增 ffprobe 流索引去重，以及编码前跳过 MP4 不兼容的数据或未知流。
+- `2026-05-23`: 采样/显示宽高比验证容忍等价有理数改写，元数据修复尝试限制为可重封装修复的失败。
+- `2026-05-25`: 新增经确认的优雅停止处理，确认期间暂停进度刷新，逐文件大小变化输出，`-nostdin` ffmpeg 运行，以及不可读 MyVidComp 临时输出的清理。
+- `2026-06-04`: 新增 `aarch64-pc-windows-gnullvm` 的 Windows ARM64 打包说明，llvm-mingw 运行时 DLL 复制进 ARM64 包，记录 Snapdragon/Qualcomm AV1 硬件检测顺序 `av1_mf` 后 `av1_vulkan`。
+- `2026-06-07`: 用户向文档统一为 MyVidComp 品牌，从仓库文档中移除扩展产品名。
+- `2026-06-21`: 新增嵌入的 `RunOptions`/`run_with_events` 核心 API、结构化 `PvacEvent` 报告、`CancellationToken` 支持和供未来 Flutter/Dart FFI GUI 集成使用的 `cdylib` C ABI，同时保持 CLI 行为。
+- `2026-06-21`: 新增 `gui/` 下的首个 Flutter 桌面 GUI、Dart FFI 绑定、worker isolate 执行、设置/进度/日志 UI，以及构建并安装 `myvidcomp_core.dll` 的 Windows CMake 集成。
+- `2026-06-21`: 完成 Windows GUI 工作流：设置持久化、选择器按钮、类型化 Dart 事件处理、`scripts/package-gui-windows.ps1`、包校验和和包输出验证。
+- `2026-06-22`: 修复空闲 GUI 进度条，GUI 内自动检测 FFmpeg/FFprobe，`-DownloadFfmpeg` Windows GUI 打包携带包内 `bin/` 运行时工具。
+- `2026-06-22`: GUI 本地化覆盖英语、简体中文、繁体中文和日语，编码器选择改为用户友好显示标签，Windows GUI 标题/产品显示名改为 `MyVidComp`，可执行名保持 `MyVidComp.exe`。
+- `2026-07-18`: 新增 `ConversionMode` 策略（默认 `consistency`，可选 `hardware`），覆盖 CLI（`--conversion-mode`）、配置（`conversion_mode`）、`RunOptions`、GUI 设置 schema v2 和本地化 GUI 策略选择器；自动编码器排序按模式区分（软件优先 vs 硬件优先），输出验证保持一致；新增版本化 FFI V2 ABI（`PvacFfiRunOptionsV2`、`pvac_run_blocking_v2`、`pvac_ffi_abi_version`）和 `mode_selected` 事件。
+- `2026-07-18`: 通过 `package-gui-windows-all.ps1` 新增确定性的 ARM64+x64 Windows GUI 发布打包、目标专属 Rust MSVC 核心构建、显式单包平台选择，以及每个打包 EXE/DLL 的 PE 架构验证。
+- `2026-07-19`: 两种转换模式改为逐文件 GPU 优先规划，consistency 模式新增精确 GPU 到 CPU 回退，hardware 模式新增最小差异 YUV GPU 适配，结构化编码器/尝试诊断、保守重试分类和隐藏 Windows 子进程创建。
+- `2026-07-20`: 新增 `OutputFormat` 策略（默认 `mp4`，可选 `mkv-fallback`），覆盖 CLI（`--output-format`）、配置（`output_format`）、`RunOptions`、GUI 设置 schema v3 和本地化 GUI 输出格式选择器；`SkipReason::UnsafeReplacement` 拆分为具体详情消息；新增 FFI V3 ABI（`PvacFfiRunOptionsV3`、`pvac_run_blocking_v3`、`output_format_selected` 事件）。
+- `2026-07-21`: 新增实际索引流映射和元数据修复探测、有界 ISO BMFF 章节引用检测、经确认的章节承载轨过滤、占位/有效章节映射与验证策略、保守 Matroska 流类型回退，并恢复保守的 MP4 编解码器白名单。文档从 `AGENTS.md` 迁入本 `doc/` 树，采用 `en-us`/`zh-cn` 双语结构。
+- `2026-09-05`：作为 **MyVidComp 0.1.0** 发布，从上一个项目全面更名。在 AV1 之外新增 H.265 和
+  H.266 输出编码，并为每种编码提供各自的编码器表、画质控制和色彩元数据处理。新增基于 VMAF 的画质
+  测量，以及通过抽样试编码找出仍能达到画质目标的最小设置的调整搜索。用输出编码、画质目标、画质策略、
+  画质检查、严格程度和编码器偏好取代了原来的转换模式与输出格式二者；已停用的 `--conversion-mode`
+  参数及其取值仍然接受。新增「平衡」严格程度，它会转换严格策略原本拒绝的文件，并保留两份副本连同改动
+  记录供用户选择。用单一的版本 1 取代了三版本嵌入 ABI。围绕四个页面重建了应用程序，并为手机、平板和
+  桌面提供自适应布局，每一项设置都用四种语言以平实的措辞加以解释。新增 Android 版本。版本号重置为
+  0.1.0，并移除构建标记。
+- `2026-09-05`：不再要求 FFmpeg 自动使用硬件解码。测试中它大约每六次运行就会直接崩溃一次，让整个
+  文件的工作白费，而耗时本来就以编码为主。硬件编码不受影响。FFmpeg 没有留下错误消息就失败时，现在
+  视为可重试而不是致命；展示失败信息时改从输出末尾选取，而不是第一行，因为第一行通常只是横幅。
+- `2026-09-05`：为输出验证加入时长检查。此前被截断的编码能通过其他所有检查，因为分辨率、帧率、流布局
+  和元数据都仍然吻合。

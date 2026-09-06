@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: "3.44.2"
+  # Pinned rather than BtbN's rolling "latest" tag, so re-running this workflow
+  # for the same version produces the same bundle and the same checksums.
+  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-23-12-56/ffmpeg-n8.0-latest-win64-gpl-8.0.zip"
+  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-23-12-56/ffmpeg-n8.0-latest-winarm64-gpl-8.0.zip"
+
+jobs:
+  check-version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: The tag and the crate agree
+        id: read
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Crate version: $version"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$version" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match crate version $version."
+              exit 1
+            fi
+          fi
+
+  windows:
+    name: Windows
+    needs: check-version
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Keyed on the pinned URLs, so changing them fetches fresh archives.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg
+          key: ffmpeg-${{ hashFiles('.github/workflows/release.yml') }}
+
+      - name: Build both Windows packages
+        shell: pwsh
+        run: |
+          ./scripts/package-gui-windows-all.ps1 `
+            -OutDir dist `
+            -DownloadFfmpeg `
+            -X64FfmpegUrl "$env:FFMPEG_X64_URL" `
+            -Arm64FfmpegUrl "$env:FFMPEG_ARM64_URL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  cli:
+    name: Command line
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 zip
+
+      - name: Fetch the media tools
+        run: |
+          curl -sSL --fail -o ffmpeg.zip "$FFMPEG_X64_URL"
+          unzip -q ffmpeg.zip -d ffmpeg
+
+      - name: Build the package
+        run: |
+          ./scripts/package.sh \
+            --target x86_64-pc-windows-gnu \
+            --with-ffmpeg "$(echo ffmpeg/*/bin)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: dist/*.zip
+          if-no-files-found: error
+
+  android:
+    name: Android
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+          local-cache: true
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build the conversion engine
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          cargo ndk -t arm64-v8a -P 29 \
+            -o gui/android/app/src/main/jniLibs build --release
+
+      # The published package cannot convert anything until the Android media
+      # tools are added; see doc/en-us/android.md.
+      - name: Build the application
+        working-directory: gui
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Name the package
+        run: |
+          mkdir -p dist
+          cp gui/build/app/outputs/flutter-apk/app-release.apk \
+            dist/MyVidComp-android-arm64.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*.apk
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [windows, cli, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Each package carries checksums for the files inside it; this one covers
+      # the downloads themselves.
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -1,0 +1,10 @@
+[package]
+name = "myvidcomp"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "myvidcomp_core"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]

@@ -1,0 +1,49 @@
+# Default MyVidComp settings, copied into release packages as config.yaml.
+# Set target_folder before running, or pass the folder on the command line.
+# Windows network path example: target_folder: '\server\share\videos'
+target_folder: "."
+
+# How many files one run may convert. -1 means every file.
+count: -1
+
+# Rename each original to <name>.old instead of replacing it.
+keep_original: true
+
+# List what would happen without converting anything.
+dry_run: true
+
+# Output codec: av1 (smallest), hevc (widest support) or vvc (experimental).
+target_codec: av1
+
+# How strictly the result must reproduce the source: flexible or strict.
+# flexible converts more files and keeps both copies when something changed.
+preservation: flexible
+
+# Quality target as a VMAF score from 50 to 100.
+quality_target: 95
+
+# How the setting is chosen: search (test-encodes samples) or estimate.
+quality_mode: search
+
+# How thoroughly the result is checked: sampled, full or off.
+quality_check: sampled
+
+# How far under the target a result may land before both files are kept.
+review_margin: 2
+
+# Which encoders to prefer: auto, gpu or cpu.
+encoder_preference: auto
+
+# Container: mp4, or mkv-fallback to use MKV when a stream will not fit.
+output_format: mp4
+
+# Leave blank to choose an encoder automatically.
+encoder:
+
+# Where working files go. Blank keeps them beside each video, which is
+# fastest for network drives.
+# tmp_dir: "D:\myvidcomp-tmp"
+
+# Blank uses the media tools that came with MyVidComp.
+# ffmpeg: "./bin/ffmpeg.exe"
+# ffprobe: "./bin/ffprobe.exe"
