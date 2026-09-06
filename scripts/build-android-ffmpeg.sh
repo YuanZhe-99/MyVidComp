@@ -165,7 +165,11 @@ unpack() {
 CMAKE_TOOLCHAIN="$WORK/android.cmake"
 {
     echo "set(CMAKE_SYSTEM_NAME Android)"
-    echo "set(CMAKE_SYSTEM_VERSION $API)"
+    # The API level belongs to the compiler wrappers below, and a version of 1
+    # is what tells cmake to leave the choice of compiler alone. Given the real
+    # level here, cmake reads the sysroot path, decides the build uses a
+    # standalone toolchain, and looks for a gcc no modern NDK contains.
+    echo "set(CMAKE_SYSTEM_VERSION 1)"
     echo "set(CMAKE_SYSTEM_PROCESSOR $FF_ARCH)"
     echo "set(CMAKE_ANDROID_ARCH_ABI $ABI)"
     echo "set(CMAKE_SYSROOT $SYSROOT)"
