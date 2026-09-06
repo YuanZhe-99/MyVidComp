@@ -88,3 +88,12 @@ changed in each one.
   end of its output rather than the first line, which was usually a banner.
 - `2026-09-05`: Added a duration check to output validation. A truncated encode previously passed
   every other check, because resolution, frame rate, stream layout and metadata all still matched.
+- `2026-09-06`: Built the media tools for Android from source and put them in the package. The
+  phone build now converts on its own, and reaches the phone's video hardware through MediaCodec,
+  which is how every Android chip maker exposes its encoders. `scripts/build-android-ffmpeg.sh`
+  builds them from pinned sources, on a host clang pointed at the NDK sysroot rather than the
+  NDK's own compiler, so it runs on Arm Linux hosts too. Translated the function reference pages
+  in the Chinese tree, which previously quoted the English source comments.
+- `2026-09-06`: Android hardware encoding now hands frames to the video hardware as it asks for
+  them. The one-frame-at-a-time default failed on the first frame for every codec on the phone
+  this was tested on, which made every hardware encoder look unusable.

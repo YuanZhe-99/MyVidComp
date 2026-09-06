@@ -10,7 +10,7 @@ What runs on every change, and how to run the same checks locally.
 |---|---|
 | Conversion engine | Formatting, lints, and tests on Linux and Windows. Also refuses any reappearance of the old project name outside the one constant that recognises files an older install left behind. |
 | Interface | Dart formatting, lints, tests, and a Windows build. |
-| Android | Builds the engine for `arm64-v8a` and the application around it, then confirms the engine really is inside the package. |
+| Android | Builds the engine for `arm64-v8a`, builds the media tools from source, and builds the application around both, then confirms all three really are inside the package. |
 | Documentation | Confirms both language trees still describe the same thing. |
 
 The engine job installs the media tools so the tests that need them actually run instead of quietly
@@ -25,6 +25,11 @@ publishes them.
 
 The media-tool download URLs are pinned to a dated build rather than the rolling one, so
 re-running the workflow for the same version produces the same bundle and the same checksums.
+
+The Android media tools are compiled rather than downloaded, which takes far longer than
+everything else in the workflow. The result is kept between runs and rebuilt only when
+`scripts/build-android-ffmpeg.sh` changes, which is also the only thing that changes what it
+produces, because every source version in it is pinned.
 
 ## Running the same checks locally
 

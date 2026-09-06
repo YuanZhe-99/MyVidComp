@@ -30,7 +30,8 @@ come in the package.
 | `myvidcomp-cli-*.zip` | The command-line tool on its own |
 | `MyVidComp-android-arm64.apk` | Android phones and tablets |
 
-The Android package cannot convert anything yet; see [doc/en-us/android.md](doc/en-us/android.md).
+The Android package carries its own media tools too, and uses the phone's video hardware where the
+phone has any; see [doc/en-us/android.md](doc/en-us/android.md).
 
 ## Use it
 

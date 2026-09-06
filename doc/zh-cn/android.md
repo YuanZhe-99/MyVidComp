@@ -1,21 +1,40 @@
 # Android
 
-手机版本、它对平台的要求，以及目前还缺什么。
+手机版本随包带了什么、它对平台的要求，以及它与桌面版的差别。
 
-## 已经可用的部分
+## 安装包里有什么
 
-应用程序可以在 Android 上构建、安装和运行。界面与桌面版是同一套，只是按手机布局。转换引擎已为
-`arm64-v8a` 编译并随应用打包，Android 会把它解包成引擎能加载的真实文件。
+转换所需的一切。界面与桌面版是同一套，只是按手机布局。转换引擎已为 `arm64-v8a` 编译，FFmpeg 工具
+也一并构建并随包提供，因此全新安装无需再下载任何东西就能转换视频。
 
-## 还缺什么
+## 视频工具
 
-视频工具尚未随包提供，因此全新安装可以浏览文件夹、修改设置，但还不能转换任何东西。它会在第一个
-屏幕上直说这一点，而不是在转换到一半时才失败。
+已发布的 Android FFmpeg 构建中没有一个带齐本项目所需的部件，因此随包的二进制由
+`scripts/build-android-ffmpeg.sh` 从源码构建。它产出一份 FFmpeg，其中包含用于画质测量的 `libvmaf`，
+用于三种输出编码的 `libx265`、`libsvtav1` 和 `libvvenc`，用于快速 AV1 解码的 `libdav1d`，以及通往
+手机自身视频硬件的 MediaCodec。
 
-Android 上没有官方的 FFmpeg 构建可供打包，而本项目所需的那种尤其苛刻：它必须包含用于画质测量的
-`libvmaf`，用于三种输出编码的 `libx265`、`libsvtav1` 和 `libvvenc`，并且要按 16 KB 内存页对齐。
-补上它意味着要么用 Android 工具链自行构建 FFmpeg，要么从某个发布 Android 命令行二进制的项目取用。
-拿到之后，`scripts/fetch-android-ffmpeg.ps1` 负责把它装好。
+该构建在 Linux 上运行，需要 clang、cmake、ninja、meson 和 make，以及一份 Android NDK sysroot。它
+不需要 NDK 自带的编译器：它使用宿主机的 clang，指向 NDK 的 sysroot 和运行时库。正因如此，它可以在
+Arm Linux 宿主上运行，包括 Arm PC 上的 WSL——而 Google 根本没有为这种宿主发布过 NDK。
+
+如果你已经从别处拿到了适用于 Android 的 Arm FFmpeg 构建，`scripts/fetch-android-ffmpeg.ps1` 可以
+用它替换这一份装好。
+
+## 使用手机的视频硬件
+
+高通、联发科、三星和 Google 都通过同一个 Android 接口 MediaCodec 暴露它们的视频编解码器，别无他
+途。没有哪个厂商需要单独适配：支持 MediaCodec 就等于支持它们全部。FFmpeg 通过平台自身的 C 接口访
+问它，不需要 Java 运行时，因此这些工具作为普通程序就能使用它。
+
+帧是按硬件索取的节奏交给它的，而不是一次一帧。一次一帧才是默认方式，在测试所用的这台手机上，它对
+每一种编码都会在第一帧就失败，因此从不采用。
+
+各款手机实际提供什么仍有差别，而且手机误报自身能力的情况多到不能轻信它声明的编码器。因此每个编码
+器在用于文件之前都会先编一帧，失败的那些会被搁置。可以指望有硬件支持的是 H.265；硬件 AV1 编码只
+存在于最新的芯片上，H.266 则一款都没有。
+
+苹果的对应物 VideoToolbox 在 macOS 版本中以同样的方式使用。
 
 ## 在 Android 上运行一个程序
 
@@ -49,10 +68,12 @@ Android 没有能返回引擎可用路径的文件夹对话框，因此应用自
 cargo install cargo-ndk
 rustup target add aarch64-linux-android
 
-scripts/build-android-core.ps1        # compile the engine
-scripts/fetch-android-ffmpeg.ps1 ...  # install the media tools
-scripts/package-android.ps1           # build the installable package
+scripts/build-android-core.ps1            # compile the engine
+scripts/package-android.ps1 -BuildFfmpeg  # media tools, then the package
 ```
+
+`-BuildFfmpeg` 会通过 WSL 运行视频工具的构建。在 Linux 上直接运行
+`scripts/build-android-ffmpeg.sh`。它第一次很慢，之后就什么都不做了，因为构建好的工具会留在原地。
 
 Gradle 构建本身也会调用引擎构建，因此只要装好 Rust 工具链，单独运行 `flutter build apk` 也可以。
 

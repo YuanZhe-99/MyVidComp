@@ -2402,12 +2402,16 @@ fn encoder_runtime_quality_args(encoder: &Encoder) -> Vec<String> {
             "-preset".to_string(),
             "faster".to_string(),
         ],
-        EncoderKind::MediaCodec => vec![
-            "-b:v".to_string(),
-            "600k".to_string(),
-            "-bitrate_mode".to_string(),
-            "1".to_string(),
-        ],
+        EncoderKind::MediaCodec => {
+            let mut args = vec![
+                "-b:v".to_string(),
+                "600k".to_string(),
+                "-bitrate_mode".to_string(),
+                "1".to_string(),
+            ];
+            args.extend(mediacodec_args());
+            args
+        }
     }
 }
 
@@ -4706,6 +4710,15 @@ fn quality_value_arg(value: f64, kind: EncoderKind) -> String {
     }
 }
 
+// AI-FUNC-SUMMARY: Builds the arguments every Android hardware encode needs; returns the argument list; side effects: none.
+fn mediacodec_args() -> Vec<String> {
+    // Android's video hardware is driven one frame at a time by default, and
+    // every phone tested refuses the very first frame that way, whatever the
+    // codec. Asking for the interface that hands frames over as the hardware
+    // asks for them is what makes it work at all.
+    vec!["-ndk_async".to_string(), "1".to_string()]
+}
+
 // AI-FUNC-SUMMARY: Builds the quality arguments for one encoder at one setting; returns the argument list; side effects: none.
 fn encoder_quality_args(encoder: &Encoder, quality: &EncoderQuality) -> Vec<String> {
     let kind = encoder.kind;
@@ -4716,6 +4729,7 @@ fn encoder_quality_args(encoder: &Encoder, quality: &EncoderQuality) -> Vec<Stri
                 // Android encoders default to a rate control that ignores the
                 // requested bitrate on some devices.
                 args.extend(["-bitrate_mode".to_string(), "1".to_string()]);
+                args.extend(mediacodec_args());
             }
             args
         }
@@ -4759,8 +4773,13 @@ fn encoder_quality_args(encoder: &Encoder, quality: &EncoderQuality) -> Vec<Stri
             // usable for batch work.
             "faster".to_string(),
         ],
-        (EncoderKind::Hardware | EncoderKind::MediaCodec, EncoderQuality::Constant(value)) => {
+        (EncoderKind::Hardware, EncoderQuality::Constant(value)) => {
             vec!["-cq".to_string(), quality_value_arg(*value, kind)]
+        }
+        (EncoderKind::MediaCodec, EncoderQuality::Constant(value)) => {
+            let mut args = vec!["-cq".to_string(), quality_value_arg(*value, kind)];
+            args.extend(mediacodec_args());
+            args
         }
     }
 }

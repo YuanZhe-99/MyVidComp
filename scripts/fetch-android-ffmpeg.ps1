@@ -1,10 +1,14 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Places the FFmpeg tools an Android build needs into the app's native library
-folder.
+Installs an FFmpeg build you already have into the Android application's native
+library folder.
 
 .DESCRIPTION
+Releases are built from source by scripts/build-android-ffmpeg.sh. This script
+is for the other case: an arm64 FFmpeg build that already exists somewhere else,
+which it copies into place with the right names.
+
 Android will only run a program from the folder it unpacks native libraries
 into, and only if the file is named like a library. The two tools are therefore
 installed as libffmpeg.so and libffprobe.so.
@@ -58,8 +62,9 @@ function Resolve-SourceDir {
 Supply either -SourceDir with an existing arm64 FFmpeg build, or -Url and
 -Sha256 for an archive to download.
 
-There is no official Android FFmpeg download. Build one, or take one from a
-project that publishes command-line builds for Android, and check that
+There is no official Android FFmpeg download. Build the one this project ships
+with scripts/build-android-ffmpeg.sh, or take a build from a project that
+publishes command-line binaries for Android, and check that
 `ffmpeg -filters` lists libvmaf and `ffmpeg -encoders` lists libx265,
 libsvtav1 and libvvenc before shipping it.
 "@

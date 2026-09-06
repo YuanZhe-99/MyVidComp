@@ -7,19 +7,33 @@ Builds the Android application and writes it to the release folder.
 Runs three steps in order: build the Rust conversion engine for Android, build
 the application around it, and copy the result out with a checksum.
 
-The FFmpeg tools have to be in place first; see scripts/fetch-android-ffmpeg.ps1.
-Without them the application installs and starts but cannot convert anything.
+The FFmpeg tools have to be in place first. They are built from source by
+scripts/build-android-ffmpeg.sh, which needs a Linux environment; on Windows
+that means WSL, and -BuildFfmpeg runs it there.
 
 .PARAMETER OutDir
 Where the finished package is written.
 
 .PARAMETER SkipEngine
 Reuse the engine libraries already under gui/android/app/src/main/jniLibs.
+
+.PARAMETER BuildFfmpeg
+Build the FFmpeg tools first, through WSL.
+
+.PARAMETER WslDistribution
+Which WSL distribution to build them in. Defaults to the one WSL starts.
+
+.PARAMETER Sysroot
+The Android sysroot inside that distribution, if it is not somewhere the build
+script finds on its own.
 #>
 [CmdletBinding()]
 param(
     [string]$OutDir = "dist",
-    [switch]$SkipEngine
+    [switch]$SkipEngine,
+    [switch]$BuildFfmpeg,
+    [string]$WslDistribution = "",
+    [string]$Sysroot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,12 +63,26 @@ if (-not $SkipEngine) {
     }
 }
 
+if ($BuildFfmpeg) {
+    Assert-Command -Name "wsl" -Hint "Install WSL, or run scripts/build-android-ffmpeg.sh on a Linux machine."
+
+    $wslRepoRoot = (& wsl @(if ($WslDistribution) { "-d"; $WslDistribution }) -- wslpath -a $repoRoot).Trim()
+    $arguments = @("bash", "$wslRepoRoot/scripts/build-android-ffmpeg.sh")
+    if ($Sysroot) { $arguments += @("--sysroot", $Sysroot) }
+
+    & wsl @(if ($WslDistribution) { "-d"; $WslDistribution }) -- @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Building the FFmpeg tools for Android failed."
+    }
+}
+
 foreach ($tool in @("libffmpeg.so", "libffprobe.so")) {
     if (-not (Test-Path -LiteralPath (Join-Path $jniLibs $tool) -PathType Leaf)) {
-        Write-Warning @"
+        throw @"
 $tool is missing from $jniLibs.
-The application will install but will not be able to convert anything.
-Run scripts/fetch-android-ffmpeg.ps1 first.
+Without it the application installs but cannot convert anything, so a release
+package is never built without the media tools in place.
+Build them with -BuildFfmpeg, or run scripts/build-android-ffmpeg.sh yourself.
 "@
     }
 }

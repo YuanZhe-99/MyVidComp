@@ -3,25 +3,22 @@
 对照源检查完成的文件，并把它放到位。面向读者的说明见
 [../validation.md](../validation.md) 和 [../safety.md](../safety.md)。
 
-声明名称与用途说明直接取自源码中的 `AI-FUNC-SUMMARY` 注释，按本仓库的编写规则，这些注释以英文书写，
-因此不作翻译。
-
 | 声明 | 种类 | 用途 |
 |---|---|---|
-| `validate_chapter_policy` | function | Validates output chapters only for confirmed chapter-carrier sources, returning semantic timestamp/title mismatch detail or success. |
-| `chapter_validation_error` | function | Compares expected and output chapter count, timestamps, and exact titles, returning detailed mismatch with practical timestamp tolerance or none. |
-| `pixel_format_validation_error` | function | Provides pixel format validation error behavior, returning the declared result. |
-| `validate_stream_signature` | function | Validates validate stream signature conditions, returning success, failure, or test assertion result. |
-| `stream_signature_validation_error` | function | Provides stream signature validation error behavior, returning the declared result. |
-| `display_metadata_validation_error` | function | Provides display metadata validation error behavior, returning the declared result. |
-| `display_metadata_matches` | function | Compares display metadata with rational tolerance for aspect ratios, returning true when values are equivalent enough for validation. |
-| `rational_metadata_matches` | function | Compares rational metadata values with a small tolerance for container rewrites, returning true when ratios are visually equivalent. |
-| `duration_validation_error` | function | Compares the converted duration against the source, returning an error when the output is noticeably shorter or longer. |
-| `color_metadata_validation_error` | function | Provides color metadata validation error behavior, returning the declared result. |
-| `color_metadata_matches` | function | Checks color metadata matches predicate, returning a boolean. |
-| `missing_chroma_location_report_is_acceptable` | function | Checks missing chroma location report is acceptable predicate, returning a boolean. |
-| `frame_rate_validation_error` | function | Provides frame rate validation error behavior, returning the declared result. |
-| `frame_rates_match` | function | Provides frame rates match behavior, returning the declared result. |
-| `frame_rate_label` | function | Provides frame rate label behavior, returning the declared result. |
-| `fps_matches` | function | Checks fps matches predicate, returning a boolean. |
-| `commit_output` | function | Performs commit output operation, returning operation status or result. |
+| `validate_chapter_policy` | function | 仅对确认存在章节载体的源校验输出章节，返回语义上的时间戳/标题不符细节或成功。 |
+| `chapter_validation_error` | function | 比较预期与输出的章节数量、时间戳和完全一致的标题，在实际时间戳容差内返回详细的不符说明或无。 |
+| `pixel_format_validation_error` | function | 提供像素格式校验错误的行为，返回声明的结果。 |
+| `validate_stream_signature` | function | 校验流签名条件，返回成功、失败或测试断言结果。 |
+| `stream_signature_validation_error` | function | 提供流签名校验错误的行为，返回声明的结果。 |
+| `display_metadata_validation_error` | function | 提供显示元数据校验错误的行为，返回声明的结果。 |
+| `display_metadata_matches` | function | 以有理数容差比较显示元数据中的宽高比，两值足够等价可通过校验时返回真。 |
+| `rational_metadata_matches` | function | 以适应容器改写的小容差比较有理数元数据值，比例在观感上等价时返回真。 |
+| `duration_validation_error` | function | 把转换后的时长与源比较，输出明显偏短或偏长时返回一条错误。 |
+| `color_metadata_validation_error` | function | 提供色彩元数据校验错误的行为，返回声明的结果。 |
+| `color_metadata_matches` | function | 检查色彩元数据是否相符，返回一个布尔值。 |
+| `missing_chroma_location_report_is_acceptable` | function | 检查缺失的色度位置报告是否可以接受，返回一个布尔值。 |
+| `frame_rate_validation_error` | function | 提供帧率校验错误的行为，返回声明的结果。 |
+| `frame_rates_match` | function | 提供帧率是否相符的行为，返回声明的结果。 |
+| `frame_rate_label` | function | 提供帧率标签的行为，返回声明的结果。 |
+| `fps_matches` | function | 检查帧率是否相符，返回一个布尔值。 |
+| `commit_output` | function | 执行输出提交操作，返回操作状态或结果。 |

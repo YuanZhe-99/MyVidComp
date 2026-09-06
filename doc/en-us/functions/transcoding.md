@@ -53,6 +53,7 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `label` | function | Describes a quality setting for logs and events, returning a short label. |
 | `default_encoder_quality` | function | Chooses the starting quality setting for one file and encoder, returning the setting on that encoder's own scale. |
 | `quality_value_arg` | function | Formats a constant-quality value the way its encoder expects it, returning the argument text. |
+| `mediacodec_args` | function | Builds the arguments every Android hardware encode needs, returning the argument list. |
 | `encoder_quality_args` | function | Builds the quality arguments for one encoder at one setting, returning the argument list. |
 | `run_ffmpeg_with_progress` | function | Runs ffmpeg while reporting progress, returning exit status plus captured stderr or process-management error. |
 | `read_to_string` | function | Provides read to string behavior, returning the declared result. |

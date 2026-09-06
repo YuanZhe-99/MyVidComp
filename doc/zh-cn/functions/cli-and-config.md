@@ -3,36 +3,33 @@
 解析命令行和设置文件，并把两者变成运行选项。面向读者的说明见
 [../options.md](../options.md)。
 
-声明名称与用途说明直接取自源码中的 `AI-FUNC-SUMMARY` 注释，按本仓库的编写规则，这些注释以英文书写，
-因此不作翻译。
-
 | 声明 | 种类 | 用途 |
 |---|---|---|
-| `parse` | function | Parses parse input, returning parsed values or errors. |
-| `parse_with_default_config` | function | Parses with default config input, returning parsed values or errors. |
-| `from` | function | Converts parsed CLI options into embedded run options, returning public run options. |
-| `usage` | function | Builds or derives usage data, returning the computed value. |
-| `version_label` | function | Builds or derives version label data, returning the computed value. |
-| `missing_target_message` | function | Checks missing target message predicate, returning a boolean. |
-| `count_limit_info` | function | Provides count limit info behavior, returning the declared result. |
-| `count_candidate_info` | function | Provides count candidate info behavior, returning the declared result. |
-| `conversion_limit` | function | Provides conversion limit behavior, returning the declared result. |
-| `conversion_limit_reached` | function | Provides conversion limit reached behavior, returning the declared result. |
-| `read` | function | Provides read behavior, returning the declared result. |
-| `parse_config_yaml` | function | Parses config yaml input, returning parsed values or errors. |
-| `strip_yaml_comment` | function | Provides strip yaml comment behavior, returning the declared result. |
-| `optional_yaml_value` | function | Reads a config value that may be left blank, returning the scalar or an empty string. |
-| `parse_yaml_scalar` | function | Parses yaml scalar input, returning parsed values or errors. |
-| `unescape_double_quoted_yaml_scalar` | function | Provides unescape double quoted yaml scalar behavior, returning the declared result. |
-| `parse_yaml_bool` | function | Parses yaml bool input, returning parsed values or errors. |
-| `normalize_encoder_choice` | function | Builds or derives normalize encoder choice data, returning the computed value. |
-| `from` | function | Constructs the associated value, returning a new instance. |
-| `map_value` | function | Returns FFmpeg's chapter input selector for this source policy, returning 0 only for meaningful confirmed chapters and -1 otherwise. |
-| `new` | function | Constructs the associated value, returning a new instance. |
-| `output_path` | function | Provides output path behavior, returning the declared result. |
-| `extension` | function | Returns the file extension used for this container, returning static extension without dot. |
-| `ffmpeg_format` | function | Returns the FFmpeg format flag for this container, returning static format name. |
-| `from_options` | function | Extracts the per-file settings from a full set of run options, returning the policy. |
-| `new` | function | Constructs the associated value, returning a new instance or a skip reason. |
-| `skip_reason_label` | function | Formats an internal skip reason for user and GUI reporting, returning a human-readable message. |
-| `is_gpu` | function | Checks whether an encoder is GPU-backed, returning true for hardware and Vulkan backends. |
+| `parse` | function | 解析输入，返回解析出的值或错误。 |
+| `parse_with_default_config` | function | 结合默认配置文件解析输入，返回解析出的值或错误。 |
+| `from` | function | 把解析出的命令行选项转换为嵌入用的运行选项，返回公开的运行选项。 |
+| `usage` | function | 构造或推导用法文本，返回算得的值。 |
+| `version_label` | function | 构造或推导版本标签，返回算得的值。 |
+| `missing_target_message` | function | 检查是否缺少目标文件夹提示，返回一个布尔值。 |
+| `count_limit_info` | function | 提供数量上限提示的行为，返回声明的结果。 |
+| `count_candidate_info` | function | 提供候选数量提示的行为，返回声明的结果。 |
+| `conversion_limit` | function | 提供转换数量上限的行为，返回声明的结果。 |
+| `conversion_limit_reached` | function | 提供是否已达转换数量上限的行为，返回声明的结果。 |
+| `read` | function | 提供读取的行为，返回声明的结果。 |
+| `parse_config_yaml` | function | 解析 YAML 配置输入，返回解析出的值或错误。 |
+| `strip_yaml_comment` | function | 提供去除 YAML 注释的行为，返回声明的结果。 |
+| `optional_yaml_value` | function | 读取一个允许留空的配置值，返回该标量或一个空字符串。 |
+| `parse_yaml_scalar` | function | 解析 YAML 标量输入，返回解析出的值或错误。 |
+| `unescape_double_quoted_yaml_scalar` | function | 提供双引号 YAML 标量反转义的行为，返回声明的结果。 |
+| `parse_yaml_bool` | function | 解析 YAML 布尔输入，返回解析出的值或错误。 |
+| `normalize_encoder_choice` | function | 构造或推导归一化后的编码器选择，返回算得的值。 |
+| `from` | function | 转换为对应的值，返回一个新实例。 |
+| `map_value` | function | 返回本源章节策略对应的 FFmpeg 章节输入选择器，只有确认存在有意义的章节时返回 0，否则返回 -1。 |
+| `new` | function | 构造对应的值，返回一个新实例。 |
+| `output_path` | function | 提供输出路径的行为，返回声明的结果。 |
+| `extension` | function | 返回本容器所用的文件扩展名，返回不带点的静态扩展名。 |
+| `ffmpeg_format` | function | 返回本容器对应的 FFmpeg 格式标志，返回静态格式名称。 |
+| `from_options` | function | 从整套运行选项中提取逐文件的设置，返回该策略。 |
+| `new` | function | 构造对应的值，返回一个新实例或一条跳过原因。 |
+| `skip_reason_label` | function | 把内部的跳过原因格式化以便向用户和界面报告，返回一条便于人读的消息。 |
+| `is_gpu` | function | 检查一个编码器是否由 GPU 支撑，硬件和 Vulkan 后端返回真。 |

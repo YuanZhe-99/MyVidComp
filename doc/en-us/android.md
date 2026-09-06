@@ -1,25 +1,47 @@
 # Android
 
-The phone build, what it needs from the platform, and what it still lacks.
+The phone build: what it ships, what it needs from the platform, and where it differs from the
+desktop.
 
-## What works
+## What is in the package
 
-The application builds, installs and runs on Android. The interface is the same one the desktop
-uses, laid out for a phone. The conversion engine is compiled for `arm64-v8a` and packaged with
-the application, and Android unpacks it as a real file the engine can load.
+Everything a conversion needs. The interface is the same one the desktop uses, laid out for a
+phone. The conversion engine is compiled for `arm64-v8a`, and the FFmpeg tools are built and
+packaged alongside it, so a fresh install converts videos without downloading anything.
 
-## What is missing
+## The media tools
 
-The media tools are not bundled yet, so a fresh install can browse folders and change settings but
-cannot convert anything. It says so plainly on the first screen rather than failing part-way
-through a conversion.
+No published Android build of FFmpeg carries what this project needs, so the shipped binaries are
+built from source by `scripts/build-android-ffmpeg.sh`. It produces one FFmpeg with `libvmaf` for
+quality measurement, `libx265`, `libsvtav1` and `libvvenc` for the three output codecs, `libdav1d`
+for fast AV1 decoding, and MediaCodec for the phone's own video hardware.
 
-There is no official Android build of FFmpeg to bundle, and the one this project needs is
-unusually demanding: it has to include `libvmaf` for quality measurement, `libx265`, `libsvtav1`
-and `libvvenc` for the three output codecs, and be aligned for 16 KB memory pages. Adding it means
-either building FFmpeg with the Android toolchain or taking a build from a project that publishes
-command-line binaries for Android. `scripts/fetch-android-ffmpeg.ps1` installs one once you have
-it.
+The build runs on Linux and needs clang, cmake, ninja, meson and make, plus an Android NDK
+sysroot. It does not need the NDK's own compiler: it uses the host's clang, pointed at the NDK
+sysroot and runtime libraries. That is what lets it run on an Arm Linux host, including WSL on an
+Arm PC, where Google publishes no NDK at all.
+
+If you already have an Arm FFmpeg build for Android from somewhere else,
+`scripts/fetch-android-ffmpeg.ps1` installs it in place of this one.
+
+## Reaching the phone's video hardware
+
+Qualcomm, MediaTek, Samsung and Google all expose their video encoders and decoders through one
+Android interface, MediaCodec, and through nothing else. There is no vendor-specific path to add:
+supporting MediaCodec supports all of them. FFmpeg reaches it through the platform's own C
+interface, which needs no Java runtime, so the tools use it as ordinary programs.
+
+Frames are handed to the hardware as it asks for them rather than one at a time. The one-at-a-time
+way is the default, and on the phone this was tested on it fails on the very first frame for every
+codec, so it is never used.
+
+What each phone actually offers still differs, and phones misreport their own abilities often
+enough that a declared encoder cannot be trusted. Every encoder is therefore given one frame to
+encode before it is used on a file, and the ones that fail are set aside. H.265 is the codec to
+expect hardware support for; AV1 encoding in hardware exists only on the newest chips, and H.266
+in none of them.
+
+Apple's equivalent, VideoToolbox, is used the same way by the macOS build.
 
 ## Running a program on Android
 
@@ -56,10 +78,13 @@ folders itself, starting from the storage volumes the platform reports.
 cargo install cargo-ndk
 rustup target add aarch64-linux-android
 
-scripts/build-android-core.ps1        # compile the engine
-scripts/fetch-android-ffmpeg.ps1 ...  # install the media tools
-scripts/package-android.ps1           # build the installable package
+scripts/build-android-core.ps1            # compile the engine
+scripts/package-android.ps1 -BuildFfmpeg  # media tools, then the package
 ```
+
+`-BuildFfmpeg` runs the media build through WSL. On Linux, run
+`scripts/build-android-ffmpeg.sh` directly. It is slow the first time and does nothing on later
+runs, because the finished tools stay where it put them.
 
 The Gradle build also invokes the engine build itself, so `flutter build apk` works on its own once
 the Rust toolchain is present.

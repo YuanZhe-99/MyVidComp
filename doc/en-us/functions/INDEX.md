@@ -1,6 +1,6 @@
 # Function index
 
-Total documented declarations in `src/`: **367**.
+Total documented declarations in `src/`: **368**.
 
 Every declaration carries an `AI-FUNC-SUMMARY` comment in the source, and every one of those
 appears on exactly one page below. The pages that mirror a module are the module; the pages that
@@ -18,7 +18,7 @@ itself is one file.
 | [cli-and-config.md](cli-and-config.md) | command line and settings file | 28 |
 | [encoders-quality.md](encoders-quality.md) | encoder detection and quality estimation | 49 |
 | [discovery-probing.md](discovery-probing.md) | finding and probing files | 20 |
-| [transcoding.md](transcoding.md) | planning and running encodes | 54 |
+| [transcoding.md](transcoding.md) | planning and running encodes | 55 |
 | [validation-commit.md](validation-commit.md) | checking a finished file | 17 |
 | [stream-policy.md](stream-policy.md) | stream mapping and container choice | 11 |
 | [chapter-carrier-parsing.md](chapter-carrier-parsing.md) | ISO BMFF chapter evidence | 5 |

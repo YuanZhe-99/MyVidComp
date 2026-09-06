@@ -35,7 +35,7 @@ layout at phone, tablet and desktop widths.
 
 ```powershell
 ../scripts/package-gui-windows-all.ps1 -DownloadFfmpeg   # both Windows packages
-../scripts/package-android.ps1                            # the Android package
+../scripts/package-android.ps1 -BuildFfmpeg               # the Android package
 ```
 
 See [doc/en-us/packaging.md](../doc/en-us/packaging.md) and

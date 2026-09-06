@@ -3,19 +3,16 @@
 决定映射哪些流，以及哪种容器能装下它们。面向读者的说明见
 [../output-format.md](../output-format.md)。
 
-声明名称与用途说明直接取自源码中的 `AI-FUNC-SUMMARY` 注释，按本仓库的编写规则，这些注释以英文书写，
-因此不作翻译。
-
 | 声明 | 种类 | 用途 |
 |---|---|---|
-| `is_chapter_carrier_candidate` | function | Checks whether a stream has all ffprobe-side traits required of a possible QuickTime chapter carrier, returning true only for data/bin_data FourCC text streams with a numeric track ID. |
-| `chapters_are_placeholder_or_empty` | function | Classifies absent chapters or one unnamed full-duration chapter as an empty placeholder, returning true within practical muxer timestamp tolerance. |
-| `parse_bmff_chapter_targets` | function | Reads ISO BMFF structure to collect track IDs explicitly targeted by tref/chap references.. |
-| `matroska_incompatible_stream_reason` | function | Finds a mapped non-primary stream type not conservatively copy-compatible with Matroska, returning actual index/type/codec detail or none. |
-| `mp4_incompatible_stream_reason` | function | Finds the first non-primary stream that cannot be copied into an MP4 container, returning a detail message or none. |
-| `is_mp4_copy_compatible_stream` | function | Checks whether a non-primary stream can be copied into the MP4 target, returning true when the stream type/codec is supported. |
-| `is_mp4_video_codec` | function | Checks whether a copied non-primary video codec is MP4-compatible, returning a boolean. |
-| `is_mp4_audio_codec` | function | Checks is mp4 audio codec predicate, returning a boolean. |
-| `is_mp4_subtitle_codec` | function | Checks whether a copied subtitle codec is MP4-compatible, returning a boolean. |
-| `interlaced_source_reason` | function | Returns a skip reason when the source is explicitly interlaced, returning none for progressive or unknown field order. |
-| `estimate_av1_crf` | function | Builds or derives estimate av1 crf data, returning the computed value. |
+| `is_chapter_carrier_candidate` | function | 检查一条流是否具备可能的 QuickTime 章节载体在 ffprobe 一侧的全部特征，仅当是带数字轨道 ID 的 data/bin_data FourCC 文本流时返回真。 |
+| `chapters_are_placeholder_or_empty` | function | 把没有章节、或只有一个无名且覆盖整个时长的章节判定为空占位，在实际封装器时间戳容差内返回真。 |
+| `parse_bmff_chapter_targets` | function | 读取 ISO BMFF 结构，收集被 tref/chap 引用明确指向的轨道 ID。 |
+| `matroska_incompatible_stream_reason` | function | 找出一条被映射的非主要流，其类型在保守规则下无法复制进 Matroska，返回实际的索引/类型/编码细节或无。 |
+| `mp4_incompatible_stream_reason` | function | 找出第一条无法复制进 MP4 容器的非主要流，返回一条细节说明或无。 |
+| `is_mp4_copy_compatible_stream` | function | 检查一条非主要流能否复制进 MP4 目标，流类型/编码受支持时返回真。 |
+| `is_mp4_video_codec` | function | 检查被复制的非主要视频编码是否兼容 MP4，返回一个布尔值。 |
+| `is_mp4_audio_codec` | function | 检查是否为 MP4 音频编码，返回一个布尔值。 |
+| `is_mp4_subtitle_codec` | function | 检查被复制的字幕编码是否兼容 MP4，返回一个布尔值。 |
+| `interlaced_source_reason` | function | 当源明确为隔行时返回一条跳过原因，逐行或场序未知时返回无。 |
+| `estimate_av1_crf` | function | 构造或推导 AV1 CRF 估算数据，返回算得的值。 |

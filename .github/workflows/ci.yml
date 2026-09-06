@@ -173,6 +173,29 @@ jobs:
           cargo ndk -t arm64-v8a -P 29 \
             -o gui/android/app/src/main/jniLibs build --release
 
+      # FFmpeg and its encoders take far longer to build than everything else
+      # here, and they only change when the build script pins new versions, so
+      # the result is kept between runs.
+      - name: Restore the media tools
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: gui/android/app/src/main/jniLibs/arm64-v8a/libff*.so
+          key: android-ffmpeg-${{ hashFiles('scripts/build-android-ffmpeg.sh') }}
+
+      - name: Install the tools the media build needs
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm cmake ninja-build meson nasm pkg-config
+
+      - name: Build the media tools
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: scripts/build-android-ffmpeg.sh
+
       - name: Build the application
         working-directory: gui
         env:
@@ -180,10 +203,12 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
         run: flutter build apk --release --target-platform android-arm64
 
-      - name: Confirm the engine is inside the package
+      - name: Confirm the engine and the media tools are inside the package
         run: |
-          unzip -l gui/build/app/outputs/flutter-apk/app-release.apk \
-            | grep 'lib/arm64-v8a/libmyvidcomp_core.so'
+          listing=$(unzip -l gui/build/app/outputs/flutter-apk/app-release.apk)
+          for library in libmyvidcomp_core.so libffmpeg.so libffprobe.so; do
+            echo "$listing" | grep "lib/arm64-v8a/$library"
+          done
 
   documentation:
     name: Documentation
