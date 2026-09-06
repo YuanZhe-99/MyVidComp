@@ -212,6 +212,10 @@ jobs:
   publish:
     name: Publish
     needs: [windows, cli, android]
+    # Only a tag publishes. Starting this workflow by hand builds everything
+    # and leaves the packages as run artifacts, which is how the packaging is
+    # rehearsed without announcing a release.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
