@@ -108,3 +108,7 @@ changed in each one.
   standalone toolchain.
 - `2026-09-06`: Released as **MyVidComp 0.1.2**, the first version built and packaged end to end
   by the published workflows.
+- `2026-09-06`: The workflows were cut down to the shape the other projects here use: fewer jobs,
+  current action versions, and the media tools taken from the rolling build of a fixed FFmpeg
+  series rather than a dated build that its publisher later removes.
+- `2026-09-06`: Released as **MyVidComp 0.1.3**.
