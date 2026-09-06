@@ -8,26 +8,24 @@ What runs on every change, and how to run the same checks locally.
 
 | Job | Checks |
 |---|---|
-| Conversion engine | Formatting, lints, and tests on Linux and Windows. Also refuses any reappearance of the old project name outside the one constant that recognises files an older install left behind. |
-| Interface | Dart formatting, lints, tests, and a Windows build. |
+| Conversion engine | Formatting, lints, and tests on Linux and Windows. |
+| Interface | Dart formatting, lints, and tests. |
 | Android | Builds the engine for `arm64-v8a`, builds the media tools from source, and builds the application around both, then confirms all three really are inside the package. |
-| Documentation | Confirms both language trees still describe the same thing. |
+| Documentation | Confirms both language trees still describe the same thing, and refuses any reappearance of the old project name outside the constant that recognises files an older install left behind. |
 
 The engine job installs the media tools so the tests that need them actually run instead of quietly
 skipping.
 
 ## On a version tag
 
-`.github/workflows/release.yml` runs when a `v*` tag is pushed. It first refuses to continue unless
-the tag matches the version in `Cargo.toml`. Then it builds the two Windows packages, the
-command-line package, and the Android package, writes one checksum file covering all of them, and
+`.github/workflows/release.yml` runs when a `v*` tag is pushed. It builds the two Windows
+packages, the command-line package and the Android package, then refuses to publish unless the tag
+matches the version in `Cargo.toml`, writes one checksum file covering every download, and
 publishes them.
 
-The media-tool download URLs are pinned to a dated build rather than the rolling one, so
-re-running the workflow for the same version produces the same bundle and the same checksums.
-Those builds are removed by their publisher after a few months; when a pinned one is gone the
-workflow takes the newest build of the same FFmpeg series instead and says so in the run, so a
-release is never blocked by a download that expired.
+The Windows packages bundle the rolling build of the FFmpeg 9.0 series. Dated builds were used
+before, until one was removed by its publisher and stopped a release; the rolling address of a
+fixed series does not expire.
 
 Starting the workflow by hand builds every package and stops there, leaving them as run
 artifacts. Only a tag publishes.

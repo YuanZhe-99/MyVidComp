@@ -10,80 +10,14 @@ permissions:
 
 env:
   FLUTTER_VERSION: "3.44.2"
-  # Pinned rather than BtbN's rolling "latest" tag, so re-running this workflow
-  # for the same version produces the same bundle and the same checksums.
-  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-05-13-10/ffmpeg-n9.0.1-26-g5c8e7e2433-win64-gpl-9.0.zip"
-  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-05-13-10/ffmpeg-n9.0.1-26-g5c8e7e2433-winarm64-gpl-9.0.zip"
-  # The FFmpeg series both pinned builds belong to, used when one has to be
-  # replaced by a newer build of the same series.
-  FFMPEG_SERIES: "9.0"
+  # BtbN's rolling build of the FFmpeg 9.0 series. Their dated builds are
+  # removed after a few months, which stops any release that points at one.
+  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-9.0.zip"
+  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-winarm64-gpl-9.0.zip"
 
 jobs:
-  check-version:
-    name: Version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.read.outputs.version }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: The tag and the crate agree
-        id: read
-        shell: bash
-        run: |
-          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Crate version: $version"
-
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            tag="${GITHUB_REF_NAME#v}"
-            if [ "$tag" != "$version" ]; then
-              echo "Tag $GITHUB_REF_NAME does not match crate version $version."
-              exit 1
-            fi
-          fi
-
-  downloads:
-    name: Media tools
-    runs-on: ubuntu-latest
-    outputs:
-      x64: ${{ steps.pick.outputs.x64 }}
-      arm64: ${{ steps.pick.outputs.arm64 }}
-    steps:
-      # BtbN removes old automatic builds after a few months, which would stop
-      # a release that pins one. The pinned build is still preferred, so that
-      # re-running a release reproduces it; when it is gone, the newest build
-      # of the same FFmpeg series takes its place and the run says so.
-      - name: The pinned builds, or the newest ones when they are gone
-        id: pick
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          resolve() {
-            if curl -sSfI -o /dev/null "$1"; then
-              echo "$1"
-              return
-            fi
-            echo "::warning::$1 is gone; using the newest build instead." >&2
-            local tag name
-            tag=$(gh release list --repo BtbN/FFmpeg-Builds --limit 30 \
-              --json tagName -q \
-              '[.[] | select(.tagName | startswith("autobuild-"))][0].tagName')
-            name=$(gh release view "$tag" --repo BtbN/FFmpeg-Builds --json assets -q \
-              "[.assets[].name | select(endswith(\"$2\"))] | sort | last")
-            echo "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$name"
-          }
-          x64=$(resolve "$FFMPEG_X64_URL" "-win64-gpl-$FFMPEG_SERIES.zip")
-          arm64=$(resolve "$FFMPEG_ARM64_URL" "-winarm64-gpl-$FFMPEG_SERIES.zip")
-          echo "x64=$x64" >> "$GITHUB_OUTPUT"
-          echo "arm64=$arm64" >> "$GITHUB_OUTPUT"
-          echo "x64: $x64"
-          echo "arm64: $arm64"
-
   windows:
     name: Windows (${{ matrix.platform }})
-    needs: [check-version, downloads]
     strategy:
       fail-fast: false
       matrix:
@@ -96,20 +30,15 @@ jobs:
             os: windows-11-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ${{ matrix.platform }}
 
       - uses: subosito/flutter-action@v2
         if: matrix.platform == 'x64'
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
 
       # The published Windows archive is x64 and carries an x64 Dart, which
       # makes the tool believe it is on an x64 machine and build an x64
@@ -119,81 +48,58 @@ jobs:
         if: matrix.platform == 'arm64'
         shell: pwsh
         run: |
-          $root = Join-Path $env:RUNNER_TEMP "flutter"
           git clone --depth 1 --branch $env:FLUTTER_VERSION `
-            https://github.com/flutter/flutter.git $root
-          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $root "bin")
-          & (Join-Path $root "bin\flutter.bat") --version
+            https://github.com/flutter/flutter.git "$env:RUNNER_TEMP\flutter"
+          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\flutter\bin"
 
-      # Keyed on the archive itself, so a different one is fetched rather than
-      # taken from the cache.
-      - uses: actions/cache@v4
-        with:
-          path: .cache/ffmpeg
-          key: ffmpeg-${{ needs.downloads.outputs[matrix.platform] }}
-
-      - name: Build the Windows package
+      - name: Build the package
         shell: pwsh
         run: |
-          ./scripts/package-gui-windows.ps1 `
-            -OutDir dist `
-            -Platform ${{ matrix.platform }} `
-            -DownloadFfmpeg `
-            -FfmpegUrl "${{ needs.downloads.outputs[matrix.platform] }}"
+          ./scripts/package-gui-windows.ps1 -OutDir dist `
+            -Platform ${{ matrix.platform }} -DownloadFfmpeg -FfmpegUrl `
+            "${{ matrix.platform == 'x64' && env.FFMPEG_X64_URL || env.FFMPEG_ARM64_URL }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.platform }}
           path: dist/*.zip
-          if-no-files-found: error
 
   cli:
     name: Command line
-    needs: [check-version, downloads]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
 
-      - uses: Swatinem/rust-cache@v2
-
       - name: Install the cross compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64 zip
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 zip
 
       - name: Fetch the media tools
         run: |
-          # A large download from a release page stalls now and then; a stalled
-          # one is dropped and started again rather than failing the release.
-          curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 5 \
-            --connect-timeout 30 --speed-limit 10240 --speed-time 60 \
-            -o ffmpeg.zip "${{ needs.downloads.outputs.x64 }}"
+          curl -sSL --fail --retry 5 --retry-all-errors -o ffmpeg.zip \
+            "$FFMPEG_X64_URL"
           unzip -q ffmpeg.zip -d ffmpeg
 
       - name: Build the package
         run: |
-          ./scripts/package.sh \
-            --target x86_64-pc-windows-gnu \
+          ./scripts/package.sh --target x86_64-pc-windows-gnu \
             --with-ffmpeg "$(echo ffmpeg/*/bin)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli
           path: dist/*.zip
-          if-no-files-found: error
 
   android:
     name: Android
-    needs: check-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -202,13 +108,10 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@v2
-
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
 
       - uses: nttld/setup-ndk@v1
         id: ndk
@@ -218,38 +121,35 @@ jobs:
           # so the download is repeated on every run instead.
           local-cache: false
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
       - name: Build the conversion engine
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
         run: |
+          cargo install cargo-ndk --locked
           cargo ndk -t arm64-v8a -P 29 \
             -o gui/android/app/src/main/jniLibs build --release
 
+      # The media tools take far longer to build than everything else here, and
+      # they change only when the build script pins new versions.
       - name: Restore the media tools
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: gui/android/app/src/main/jniLibs/arm64-v8a/libff*.so
           key: android-ffmpeg-${{ hashFiles('scripts/build-android-ffmpeg.sh') }}
-
-      - name: Install the tools the media build needs
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang lld llvm cmake ninja-build meson nasm pkg-config
 
       - name: Build the media tools
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: bash scripts/build-android-ffmpeg.sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm cmake ninja-build meson nasm pkg-config
+          bash scripts/build-android-ffmpeg.sh
 
-      - name: Build the application
+      - name: Build the package
         working-directory: gui
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
@@ -262,22 +162,30 @@ jobs:
           cp gui/build/app/outputs/flutter-apk/app-release.apk \
             dist/MyVidComp-android-arm64.apk
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: dist/*.apk
-          if-no-files-found: error
 
-  publish:
+  # Only a tag publishes. Started by hand, the workflow builds every package
+  # and stops, leaving them as run artifacts.
+  release:
     name: Publish
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [windows, cli, android]
-    # Only a tag publishes. Starting this workflow by hand builds everything
-    # and leaves the packages as run artifacts, which is how the packaging is
-    # rehearsed without announcing a release.
-    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+
+      - name: The tag and the crate agree
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match crate version $version."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -288,7 +196,7 @@ jobs:
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

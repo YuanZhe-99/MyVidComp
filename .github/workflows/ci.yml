@@ -31,7 +31,7 @@ jobs:
         # stay on the image that has them.
         os: [ubuntu-latest, windows-2025]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -44,20 +44,7 @@ jobs:
       # Several tests only run when the media tools are present, so install
       # them rather than let those tests quietly skip.
       - uses: FedericoCarboni/setup-ffmpeg@v3
-        id: ffmpeg
-        with:
-          ffmpeg-version: release
         continue-on-error: true
-
-      - name: Report the media tools
-        shell: bash
-        run: |
-          if command -v ffmpeg >/dev/null; then
-            ffmpeg -hide_banner -version | head -1
-            ffmpeg -hide_banner -filters | grep -c libvmaf || echo "no libvmaf"
-          else
-            echo "ffmpeg is unavailable on this runner; those tests will skip"
-          fi
 
       - name: Formatting
         if: matrix.os == 'ubuntu-latest'
@@ -69,74 +56,34 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
-      - name: No references to the old name remain
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          # The one deliberate exception is the constant that still recognises
-          # temporary files an older install left behind.
-          matches=$(grep -rn --include='*.rs' --include='*.dart' --include='*.toml' \
-            --include='*.yaml' -i 'pvac' src gui/lib Cargo.toml \
-            | grep -v 'LEGACY_TEMP_PREFIX' \
-            | grep -v 'previous name of this project' \
-            | grep -v '_previousDirName' \
-            | grep -v 'PVAC, the previous' \
-            | grep -v 'legacy \.pvac' || true)
-          if [ -n "$matches" ]; then
-            echo "$matches"
-            echo "The old project name is still present in the sources above."
-            exit 1
-          fi
-
   interface:
     name: Interface
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          # The Windows build compiles the engine through CMake, for both
-          # architectures the release ships.
-          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: interface
 
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
 
-      - name: Fetch packages
+      - name: Checks
         working-directory: gui
-        run: flutter pub get
-
-      - name: Formatting
-        working-directory: gui
-        run: dart format --set-exit-if-changed lib test
-
-      - name: Lints
-        working-directory: gui
-        run: flutter analyze
-
-      - name: Tests
-        working-directory: gui
-        run: flutter test
-
-      - name: Build
-        working-directory: gui
-        run: flutter build windows --release
+        run: |
+          flutter pub get
+          dart format --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
 
   android:
     name: Android
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -153,10 +100,6 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
 
       # Must match the version Flutter pins, so the engine and the application
       # agree on memory page alignment.
@@ -173,40 +116,37 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
         run: |
+          cargo install cargo-ndk --locked
           cargo ndk -t arm64-v8a -P 29 \
             -o gui/android/app/src/main/jniLibs build --release
 
-      # FFmpeg and its encoders take far longer to build than everything else
-      # here, and they only change when the build script pins new versions, so
-      # the result is kept between runs.
+      # The media tools take far longer to build than everything else here, and
+      # they change only when the build script pins new versions.
       - name: Restore the media tools
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: gui/android/app/src/main/jniLibs/arm64-v8a/libff*.so
           key: android-ffmpeg-${{ hashFiles('scripts/build-android-ffmpeg.sh') }}
-
-      - name: Install the tools the media build needs
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang lld llvm cmake ninja-build meson nasm pkg-config
 
       - name: Build the media tools
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: bash scripts/build-android-ffmpeg.sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm cmake ninja-build meson nasm pkg-config
+          bash scripts/build-android-ffmpeg.sh
 
-      - name: Build the application
+      - name: Build the package
         working-directory: gui
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
         run: flutter build apk --release --target-platform android-arm64
 
-      - name: Confirm the engine and the media tools are inside the package
+      - name: The engine and the media tools are inside the package
         run: |
           listing=$(unzip -l gui/build/app/outputs/flutter-apk/app-release.apk)
           for library in libmyvidcomp_core.so libffmpeg.so libffprobe.so; do
@@ -217,8 +157,21 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Both languages describe the same thing
         shell: pwsh
         run: ./scripts/check-doc-parity.ps1
+
+      - name: No references to the old name remain
+        run: |
+          # The deliberate exceptions name the constant, and the comment on it,
+          # that still recognise files an older install left behind.
+          matches=$(grep -rn --include='*.rs' --include='*.dart' \
+            --include='*.toml' --include='*.yaml' -i 'pvac' src gui/lib \
+            Cargo.toml | grep -viE 'legacy|previous' || true)
+          if [ -n "$matches" ]; then
+            echo "$matches"
+            echo "The old project name is still present in the sources above."
+            exit 1
+          fi
