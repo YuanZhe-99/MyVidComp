@@ -70,6 +70,10 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+          # Flutter publishes one Windows archive, and it is the x64 one. On an
+          # Arm machine it fetches the Arm halves it needs on first use, which
+          # is how the Arm64 package gets built at all.
+          architecture: x64
 
       # Keyed on the pinned URLs, so changing them fetches fresh archives.
       - uses: actions/cache@v4
