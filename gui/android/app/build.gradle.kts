@@ -1,3 +1,7 @@
+// Imported rather than written out in full below: a build script has a `java`
+// property of its own, which hides the package of the same name.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -8,7 +12,7 @@ plugins {
 // a signed build made here. Without it a release build is signed with the debug
 // key, which installs but can never be updated by a properly signed package.
 val keystorePropertiesFile = rootProject.file("key.properties")
-val keystoreProperties = java.util.Properties()
+val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
