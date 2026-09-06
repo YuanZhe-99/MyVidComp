@@ -14,6 +14,9 @@ env:
   # for the same version produces the same bundle and the same checksums.
   FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-05-13-10/ffmpeg-n9.0.1-26-g5c8e7e2433-win64-gpl-9.0.zip"
   FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-05-13-10/ffmpeg-n9.0.1-26-g5c8e7e2433-winarm64-gpl-9.0.zip"
+  # The FFmpeg series both pinned builds belong to, used when one has to be
+  # replaced by a newer build of the same series.
+  FFMPEG_SERIES: "9.0"
 
 jobs:
   check-version:
@@ -40,9 +43,47 @@ jobs:
             fi
           fi
 
+  downloads:
+    name: Media tools
+    runs-on: ubuntu-latest
+    outputs:
+      x64: ${{ steps.pick.outputs.x64 }}
+      arm64: ${{ steps.pick.outputs.arm64 }}
+    steps:
+      # BtbN removes old automatic builds after a few months, which would stop
+      # a release that pins one. The pinned build is still preferred, so that
+      # re-running a release reproduces it; when it is gone, the newest build
+      # of the same FFmpeg series takes its place and the run says so.
+      - name: The pinned builds, or the newest ones when they are gone
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          resolve() {
+            if curl -sSfI -o /dev/null "$1"; then
+              echo "$1"
+              return
+            fi
+            echo "::warning::$1 is gone; using the newest build instead." >&2
+            local tag name
+            tag=$(gh release list --repo BtbN/FFmpeg-Builds --limit 30 \
+              --json tagName -q \
+              '[.[] | select(.tagName | startswith("autobuild-"))][0].tagName')
+            name=$(gh release view "$tag" --repo BtbN/FFmpeg-Builds --json assets -q \
+              "[.assets[].name | select(endswith(\"$2\"))] | sort | last")
+            echo "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$name"
+          }
+          x64=$(resolve "$FFMPEG_X64_URL" "-win64-gpl-$FFMPEG_SERIES.zip")
+          arm64=$(resolve "$FFMPEG_ARM64_URL" "-winarm64-gpl-$FFMPEG_SERIES.zip")
+          echo "x64=$x64" >> "$GITHUB_OUTPUT"
+          echo "arm64=$arm64" >> "$GITHUB_OUTPUT"
+          echo "x64: $x64"
+          echo "arm64: $arm64"
+
   windows:
     name: Windows (${{ matrix.platform }})
-    needs: check-version
+    needs: [check-version, downloads]
     strategy:
       fail-fast: false
       matrix:
@@ -51,10 +92,8 @@ jobs:
         include:
           - platform: x64
             os: windows-2025
-            ffmpeg: FFMPEG_X64_URL
           - platform: arm64
             os: windows-11-arm
-            ffmpeg: FFMPEG_ARM64_URL
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -86,11 +125,12 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $root "bin")
           & (Join-Path $root "bin\flutter.bat") --version
 
-      # Keyed on the pinned URLs, so changing them fetches fresh archives.
+      # Keyed on the archive itself, so a different one is fetched rather than
+      # taken from the cache.
       - uses: actions/cache@v4
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ matrix.platform }}-${{ hashFiles('.github/workflows/release.yml') }}
+          key: ffmpeg-${{ needs.downloads.outputs[matrix.platform] }}
 
       - name: Build the Windows package
         shell: pwsh
@@ -99,7 +139,7 @@ jobs:
             -OutDir dist `
             -Platform ${{ matrix.platform }} `
             -DownloadFfmpeg `
-            -FfmpegUrl "${{ env[matrix.ffmpeg] }}"
+            -FfmpegUrl "${{ needs.downloads.outputs[matrix.platform] }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -109,7 +149,7 @@ jobs:
 
   cli:
     name: Command line
-    needs: check-version
+    needs: [check-version, downloads]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -127,7 +167,7 @@ jobs:
 
       - name: Fetch the media tools
         run: |
-          curl -sSL --fail -o ffmpeg.zip "$FFMPEG_X64_URL"
+          curl -sSL --fail -o ffmpeg.zip "${{ needs.downloads.outputs.x64 }}"
           unzip -q ffmpeg.zip -d ffmpeg
 
       - name: Build the package

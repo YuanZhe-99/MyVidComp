@@ -25,11 +25,32 @@ publishes them.
 
 The media-tool download URLs are pinned to a dated build rather than the rolling one, so
 re-running the workflow for the same version produces the same bundle and the same checksums.
+Those builds are removed by their publisher after a few months; when a pinned one is gone the
+workflow takes the newest build of the same FFmpeg series instead and says so in the run, so a
+release is never blocked by a download that expired.
+
+Starting the workflow by hand builds every package and stops there, leaving them as run
+artifacts. Only a tag publishes.
 
 The Android media tools are compiled rather than downloaded, which takes far longer than
 everything else in the workflow. The result is kept between runs and rebuilt only when
 `scripts/build-android-ffmpeg.sh` changes, which is also the only thing that changes what it
 produces, because every source version in it is pinned.
+
+## Cutting a release
+
+Set the new version in `Cargo.toml`, `gui/pubspec.yaml` and `gui/windows/runner/Runner.rc`, say
+what changed in `version-history.md` in both languages, then:
+
+```sh
+git commit -am "Release 0.1.2"
+git tag -a v0.1.2 -m "MyVidComp 0.1.2"
+git push github main
+git push github v0.1.2
+```
+
+Pushing the tag is the whole trigger: nothing else has to be started by hand. The tag has to reach
+the GitHub remote, so a tag pushed only to another remote builds nothing there.
 
 ## Running the same checks locally
 
