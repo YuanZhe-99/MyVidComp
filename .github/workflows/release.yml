@@ -66,14 +66,25 @@ jobs:
           shared-key: ${{ matrix.platform }}
 
       - uses: subosito/flutter-action@v2
+        if: matrix.platform == 'x64'
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-          # Flutter publishes one Windows archive, and it is the x64 one. On an
-          # Arm machine it fetches the Arm halves it needs on first use, which
-          # is how the Arm64 package gets built at all.
-          architecture: x64
+
+      # The published Windows archive is x64 and carries an x64 Dart, which
+      # makes the tool believe it is on an x64 machine and build an x64
+      # application. A clone fetches the halves that match the machine it is
+      # sitting on, which is what lets an Arm runner build an Arm package.
+      - name: Install Flutter for Arm
+        if: matrix.platform == 'arm64'
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "flutter"
+          git clone --depth 1 --branch $env:FLUTTER_VERSION `
+            https://github.com/flutter/flutter.git $root
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $root "bin")
+          & (Join-Path $root "bin\flutter.bat") --version
 
       # Keyed on the pinned URLs, so changing them fetches fresh archives.
       - uses: actions/cache@v4
