@@ -8,7 +8,8 @@ param(
     [string]$FfmpegCacheDir = "",
     [switch]$RefreshFfmpeg,
     [switch]$SkipBuild,
-    [switch]$NoArchive
+    [switch]$NoArchive,
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,7 @@ $ErrorActionPreference = "Stop"
 $RootDir = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $GuiDir = Join-Path $RootDir "gui"
 $SinglePackageScript = Join-Path $PSScriptRoot "package-gui-windows.ps1"
+$InstallerScript = Join-Path $PSScriptRoot "package-gui-windows-installer.ps1"
 
 if ($DownloadFfmpeg -and ($Arm64Ffmpeg -ne "" -or $X64Ffmpeg -ne "")) {
     throw "Use either -DownloadFfmpeg or per-platform -Arm64Ffmpeg/-X64Ffmpeg directories, not both."
@@ -177,3 +179,10 @@ if (-not $SkipBuild) {
 
 Package-Platform -Platform "arm64"
 Package-Platform -Platform "x64"
+
+if ($Installer) {
+    # The staged folders are what the installer wraps, so this runs after both
+    # of them exist.
+    & $InstallerScript -Platform "arm64" -OutDir $OutDir
+    & $InstallerScript -Platform "x64" -OutDir $OutDir
+}

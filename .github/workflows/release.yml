@@ -59,10 +59,19 @@ jobs:
             -Platform ${{ matrix.platform }} -DownloadFfmpeg -FfmpegUrl `
             "${{ matrix.platform == 'x64' && env.FFMPEG_X64_URL || env.FFMPEG_ARM64_URL }}"
 
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: ./scripts/package-gui-windows-installer.ps1 -Platform ${{ matrix.platform }}
+
       - uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.platform }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.exe
 
   cli:
     name: Command line
