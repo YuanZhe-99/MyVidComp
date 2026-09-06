@@ -96,6 +96,8 @@ jobs:
   android:
     name: Android
     runs-on: ubuntu-latest
+    env:
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -149,12 +151,32 @@ jobs:
             clang lld llvm cmake ninja-build meson nasm pkg-config
           bash scripts/build-android-ffmpeg.sh
 
+      # Without the keystore the package is signed with the debug key, which is
+      # enough to install but not to replace an earlier signed install.
+      - name: Setup Android signing
+        if: ${{ env.HAS_KEYSTORE == 'true' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > gui/android/app/upload-keystore.jks
+          printf 'storeFile=upload-keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > gui/android/key.properties
+
       - name: Build the package
         working-directory: gui
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
         run: flutter build apk --release --target-platform android-arm64
+
+      - name: The package carries a signature
+        run: |
+          signer=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | tail -n 1)
+          "$signer" verify --print-certs \
+            gui/build/app/outputs/flutter-apk/app-release.apk
 
       - name: Name the package
         run: |

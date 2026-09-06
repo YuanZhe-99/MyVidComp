@@ -112,3 +112,7 @@ changed in each one.
   current action versions, and the media tools taken from the rolling build of a fixed FFmpeg
   series rather than a dated build that its publisher later removes.
 - `2026-09-06`: Released as **MyVidComp 0.1.3**.
+- `2026-09-06`: The Android package is signed with the upload key. The release workflow writes the
+  keystore and its properties from the repository secrets, and the build reads them; without them
+  the debug key is still used, which installs but can never be replaced by a signed package.
+- `2026-09-06`: Released as **MyVidComp 0.1.4**, the first signed Android package.

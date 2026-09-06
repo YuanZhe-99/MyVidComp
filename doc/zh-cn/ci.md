@@ -30,6 +30,22 @@ Android 的视频工具是编译出来的而不是下载来的，耗时远超工
 行之间保留，只有 `scripts/build-android-ffmpeg.sh` 变动时才重新构建——而它也是唯一会改变产出的因
 素，因为其中每一个源码版本都是固定的。
 
+## 给 Android 包签名
+
+仓库里设置了下面四个 secret 时，安装包用上传密钥签名；没有设置时则用调试密钥签名。调试密钥签名的
+包能装上，但之后用真实密钥签名的包永远无法覆盖它，所以发给别人的版本必须带上真实签名。
+
+```
+KEYSTORE_BASE64
+STORE_PASSWORD
+KEY_ALIAS
+KEY_PASSWORD
+```
+
+`KEYSTORE_BASE64` 就是密钥库文件本身经 base64 编码后的内容。工作流会把它解码到
+`gui/android/app/upload-keystore.jks`，并把其余三项写进 `gui/android/key.properties`；这两个文件
+都被 Git 忽略。在本地手写同一份属性文件，就能给这里构建的包签名。
+
 ## 发布一个版本
 
 在 `Cargo.toml`、`gui/pubspec.yaml` 和 `gui/windows/runner/Runner.rc` 中写入新版本号，在两种语言的

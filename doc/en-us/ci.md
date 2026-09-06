@@ -35,6 +35,23 @@ everything else in the workflow. The result is kept between runs and rebuilt onl
 `scripts/build-android-ffmpeg.sh` changes, which is also the only thing that changes what it
 produces, because every source version in it is pinned.
 
+## Signing the Android package
+
+The package is signed with the upload key when all four of these repository secrets are set, and
+with the debug key when they are not. A debug-signed package installs, but nothing signed with the
+real key can ever replace it, so a release meant for people has to carry the real signature.
+
+```
+KEYSTORE_BASE64
+STORE_PASSWORD
+KEY_ALIAS
+KEY_PASSWORD
+```
+
+`KEYSTORE_BASE64` is the keystore file itself, base64-encoded. The workflow decodes it to
+`gui/android/app/upload-keystore.jks` and writes the other three into `gui/android/key.properties`;
+Git ignores both. Writing that same properties file by hand is what signs a build made here.
+
 ## Cutting a release
 
 Set the new version in `Cargo.toml`, `gui/pubspec.yaml` and `gui/windows/runner/Runner.rc`, say
