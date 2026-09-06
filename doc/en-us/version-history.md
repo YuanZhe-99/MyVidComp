@@ -97,3 +97,5 @@ changed in each one.
 - `2026-09-06`: Android hardware encoding now hands frames to the video hardware as it asks for
   them. The one-frame-at-a-time default failed on the first frame for every codec on the phone
   this was tested on, which made every hardware encoder look unusable.
+- `2026-09-06`: Released as **MyVidComp 0.1.1**, the first version whose Android package converts
+  videos on its own.
