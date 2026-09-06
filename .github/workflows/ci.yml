@@ -80,7 +80,8 @@ jobs:
             | grep -v 'LEGACY_TEMP_PREFIX' \
             | grep -v 'previous name of this project' \
             | grep -v '_previousDirName' \
-            | grep -v 'PVAC, the previous' || true)
+            | grep -v 'PVAC, the previous' \
+            | grep -v 'legacy \.pvac' || true)
           if [ -n "$matches" ]; then
             echo "$matches"
             echo "The old project name is still present in the sources above."
@@ -194,7 +195,7 @@ jobs:
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: scripts/build-android-ffmpeg.sh
+        run: bash scripts/build-android-ffmpeg.sh
 
       - name: Build the application
         working-directory: gui

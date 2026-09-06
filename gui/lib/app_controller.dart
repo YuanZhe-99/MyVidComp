@@ -187,7 +187,15 @@ class AppController extends ChangeNotifier {
 
     _loadingReviews = true;
     notifyListeners();
-    _reviews = await _reviewStore.list(_settings.targetFolder);
+    try {
+      _reviews = await _reviewStore.list(_settings.targetFolder);
+    } catch (error) {
+      // The engine is what reads this list, and it can be missing or unusable.
+      // The screen that reports missing tools covers that case, so the list is
+      // left empty here instead of stopping the rest of the application.
+      _reviews = const [];
+      _notice = error.toString();
+    }
     _reviewCount = _reviews.length;
     _loadingReviews = false;
     notifyListeners();

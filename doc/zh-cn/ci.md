@@ -49,8 +49,9 @@ scripts/package-gui-windows-all.ps1 -DownloadFfmpeg
 
 ## 运行环境镜像
 
-Windows 任务固定使用 `windows-2025` 而不是 `windows-latest`。较新的镜像缺少双架构打包所需的 Arm64
-构建工具，固定版本能让两个工作流都留在有这些工具的镜像上。等上游修好之后再重新评估。
+发布流程在与目标架构相同的运行器上分别构建两个 Windows 安装包：x64 用 `windows-2025`，Arm64 用
+`windows-11-arm`。Flutter 只会为它自己运行的机器构建 Windows 应用，所以单个运行器无法同时产出两
+者。这里固定 `windows-2025` 而不是 `windows-latest`，是因为较新的镜像缺少打包所需的构建工具。
 
 Flutter 固定到确切版本而不是发布通道，这样 Flutter 的新版本就不会在一份能用的检出下面把构建改掉。
 

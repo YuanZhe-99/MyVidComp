@@ -12,8 +12,8 @@ env:
   FLUTTER_VERSION: "3.44.2"
   # Pinned rather than BtbN's rolling "latest" tag, so re-running this workflow
   # for the same version produces the same bundle and the same checksums.
-  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-23-12-56/ffmpeg-n8.0-latest-win64-gpl-8.0.zip"
-  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-23-12-56/ffmpeg-n8.0-latest-winarm64-gpl-8.0.zip"
+  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-05-13-10/ffmpeg-n9.0.1-26-g5c8e7e2433-win64-gpl-9.0.zip"
+  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-05-13-10/ffmpeg-n9.0.1-26-g5c8e7e2433-winarm64-gpl-9.0.zip"
 
 jobs:
   check-version:
@@ -41,17 +41,29 @@ jobs:
           fi
 
   windows:
-    name: Windows
+    name: Windows (${{ matrix.platform }})
     needs: check-version
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        # Flutter builds a Windows application only for the machine it runs on,
+        # so each package is built on a runner of its own architecture.
+        include:
+          - platform: x64
+            os: windows-2025
+            ffmpeg: FFMPEG_X64_URL
+          - platform: arm64
+            os: windows-11-arm
+            ffmpeg: FFMPEG_ARM64_URL
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.platform }}
 
       - uses: subosito/flutter-action@v2
         with:
@@ -63,20 +75,20 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ hashFiles('.github/workflows/release.yml') }}
+          key: ffmpeg-${{ matrix.platform }}-${{ hashFiles('.github/workflows/release.yml') }}
 
-      - name: Build both Windows packages
+      - name: Build the Windows package
         shell: pwsh
         run: |
-          ./scripts/package-gui-windows-all.ps1 `
+          ./scripts/package-gui-windows.ps1 `
             -OutDir dist `
+            -Platform ${{ matrix.platform }} `
             -DownloadFfmpeg `
-            -X64FfmpegUrl "$env:FFMPEG_X64_URL" `
-            -Arm64FfmpegUrl "$env:FFMPEG_ARM64_URL"
+            -FfmpegUrl "${{ env[matrix.ffmpeg] }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
+          name: windows-${{ matrix.platform }}
           path: dist/*.zip
           if-no-files-found: error
 
@@ -174,7 +186,7 @@ jobs:
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: scripts/build-android-ffmpeg.sh
+        run: bash scripts/build-android-ffmpeg.sh
 
       - name: Build the application
         working-directory: gui

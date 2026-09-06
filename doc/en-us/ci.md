@@ -52,9 +52,10 @@ scripts/package-gui-windows-all.ps1 -DownloadFfmpeg
 
 ## Runner images
 
-The Windows jobs pin `windows-2025` rather than `windows-latest`. The newer image is missing the
-Arm64 build tools the dual-architecture packaging needs, and pinning keeps both workflows on the
-image that has them. Revisit this once that is fixed upstream.
+The release builds each Windows package on a runner of its own architecture: `windows-2025` for
+x64 and `windows-11-arm` for Arm64. Flutter builds a Windows application only for the machine it
+is running on, so no single runner can produce both. `windows-2025` is pinned rather than
+`windows-latest` because the newer image is missing build tools the packaging needs.
 
 Flutter is pinned to an exact version rather than a channel, so a Flutter release never changes the
 build underneath a working checkout.
