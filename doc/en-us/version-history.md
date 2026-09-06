@@ -99,3 +99,12 @@ changed in each one.
   this was tested on, which made every hardware encoder look unusable.
 - `2026-09-06`: Released as **MyVidComp 0.1.1**, the first version whose Android package converts
   videos on its own.
+- `2026-09-06`: The review list no longer fails when the engine cannot be loaded; the screen that
+  reports missing tools covers that case on its own.
+- `2026-09-06`: The published workflows now run on GitHub. Each Windows package is built on a
+  runner of its own architecture, with Flutter cloned on the Arm one so it fetches the halves that
+  match the machine; the Android toolchain is downloaded rather than restored from a cache that
+  loses its compiler; and the cmake toolchain file no longer lets cmake mistake the sysroot for a
+  standalone toolchain.
+- `2026-09-06`: Released as **MyVidComp 0.1.2**, the first version built and packaged end to end
+  by the published workflows.
