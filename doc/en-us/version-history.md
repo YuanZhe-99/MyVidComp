@@ -139,3 +139,7 @@ changed in each one.
   working.
 - `2026-09-06`: Released as **MyVidComp 0.1.4**, the first version with an installer and the first
   signed Android package.
+- `2026-09-06`: A quality comparison can run entirely on an NVIDIA card when the FFmpeg in use has
+  the `libvmaf_cuda` filter and `--decoder cuda` was asked for by name. No distributed build has
+  that filter: it needs FFmpeg configured `--enable-nonfree`, which cannot be redistributed, so the
+  bundled build offers decoding on the card but not scoring on it.

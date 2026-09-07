@@ -92,6 +92,97 @@ pub fn detect_vmaf_support(ffmpeg: &str) -> (VmafSupport, Option<String>) {
     }
 }
 
+// AI-FUNC-SUMMARY:
+// Purpose: Checks whether this FFmpeg build can score on the graphics card.
+// Inputs: The ffmpeg command.
+// Returns: True when the CUDA variant of the filter is present.
+// Side effects: Runs ffmpeg once to list the filter.
+// Notes: Almost no build has it. It needs libvmaf compiled with CUDA and ffmpeg configured --enable-nonfree, and a nonfree build cannot be redistributed, so nobody ships one.
+pub fn detect_vmaf_cuda_support(ffmpeg: &str) -> bool {
+    let output = process_command(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-h",
+            "filter=libvmaf_cuda",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    let Ok(output) = output else {
+        return false;
+    };
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    text.contains("libvmaf_cuda") && text.contains("n_subsample")
+}
+
+// AI-FUNC-SUMMARY:
+// Purpose: Reports whether a source can be compared on the graphics card at all.
+// Inputs: The source video.
+// Returns: True only for eight-bit 4:2:0, which is all the CUDA filter accepts.
+// Side effects: None.
+pub fn can_score_on_gpu(video: &VideoInfo) -> bool {
+    comparison_pixel_format(video) == "yuv420p"
+}
+
+// AI-FUNC-SUMMARY:
+// Purpose: Builds the arguments that compare two files entirely on the graphics card.
+// Inputs: The two files, the source video, the measurement settings and whether to report progress.
+// Returns: The argument list.
+// Side effects: None.
+// Notes: The frames stay in graphics memory from decode to score, which is the opposite of the processor path and the reason for -hwaccel_output_format here.
+pub fn build_vmaf_cuda_args(
+    distorted: &Path,
+    reference: &Path,
+    video: &VideoInfo,
+    options: VmafOptions,
+    progress: bool,
+) -> Vec<String> {
+    let model = model_for(video);
+    let subsample = options.subsample.max(1);
+
+    // scale_cuda does on the card what format= does on the processor. There is
+    // no n_threads: the work is on the card, not on worker threads.
+    let filter = format!(
+        "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,scale_cuda=format=yuv420p[dist];\
+         [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,scale_cuda=format=yuv420p[ref];\
+         [dist][ref]libvmaf_cuda=model=version={model}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest"
+    );
+
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-nostdin".to_string(),
+        "-loglevel".to_string(),
+        "info".to_string(),
+        "-nostats".to_string(),
+    ];
+    if progress {
+        args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
+    }
+    for path in [distorted, reference] {
+        args.extend([
+            "-hwaccel".to_string(),
+            "cuda".to_string(),
+            "-hwaccel_output_format".to_string(),
+            "cuda".to_string(),
+            "-i".to_string(),
+            path.to_string_lossy().to_string(),
+        ]);
+    }
+    args.extend([
+        "-lavfi".to_string(),
+        filter,
+        "-f".to_string(),
+        "null".to_string(),
+        "-".to_string(),
+    ]);
+    args
+}
+
 // AI-FUNC-SUMMARY: Chooses the VMAF model that matches the source resolution; returns the built-in model name; side effects: none.
 pub fn model_for(video: &VideoInfo) -> &'static str {
     // Netflix ships a separate model trained for 4K viewing distances. Above
@@ -417,6 +508,41 @@ mod tests {
             (Some(HwAccel::Cuda), Some(HwAccel::Cuda)),
         );
         assert_eq!(both.iter().filter(|arg| *arg == "-hwaccel").count(), 2);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies the card-only comparison keeps its frames on the card and converts them there; returns nothing; side effects: none.
+    fn builds_a_comparison_that_stays_on_the_card() {
+        let args = build_vmaf_cuda_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/clip.mkv"),
+            &video(1920, 1080, "yuv420p"),
+            VmafOptions::default(),
+            false,
+        );
+
+        let joined = args.join(" ");
+        // The opposite of the processor path: here the frames must stay put.
+        assert_eq!(
+            args.iter()
+                .filter(|arg| *arg == "-hwaccel_output_format")
+                .count(),
+            2
+        );
+        assert!(joined.contains("scale_cuda=format=yuv420p"));
+        assert!(joined.contains("[dist][ref]libvmaf_cuda"));
+        // Worker threads are a processor idea; the card has none.
+        assert!(!joined.contains("n_threads"));
+        assert!(joined.contains("n_subsample=5"));
+        assert!(joined.ends_with("-f null -"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies only eight-bit 4:2:0 is offered to the card, which is all its filter takes; returns nothing; side effects: none.
+    fn only_eight_bit_four_two_zero_goes_to_the_card() {
+        assert!(can_score_on_gpu(&video(1920, 1080, "yuv420p")));
+        assert!(!can_score_on_gpu(&video(1920, 1080, "yuv420p10le")));
+        assert!(!can_score_on_gpu(&video(1920, 1080, "yuv444p")));
     }
 
     #[test]

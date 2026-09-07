@@ -170,6 +170,9 @@ pub struct Decoding {
     checked: HashMap<String, bool>,
     /// Set once the method has failed during real work.
     disabled: bool,
+    /// Whether the comparison itself can run on the card as well as the
+    /// decoding. Almost never: see vmaf::detect_vmaf_cuda_support.
+    scoring: bool,
 }
 
 impl Decoding {
@@ -253,6 +256,16 @@ impl Decoding {
     // AI-FUNC-SUMMARY: Stops using the graphics card for the rest of the run; returns none; side effects: updates the decision.
     pub fn disable(&mut self) {
         self.disabled = true;
+    }
+
+    // AI-FUNC-SUMMARY: Records that this build can also score on the card; returns none; side effects: updates the decision.
+    pub fn enable_gpu_scoring(&mut self) {
+        self.scoring = true;
+    }
+
+    // AI-FUNC-SUMMARY: Reports whether the comparison itself should run on the card; returns true only while the card is still in use; side effects: none.
+    pub fn scores_on_gpu(&self) -> bool {
+        self.scoring && self.method() == Some(HwAccel::Cuda)
     }
 }
 

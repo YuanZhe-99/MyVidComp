@@ -126,3 +126,29 @@ none can be used. A method name such as `d3d11va`, `cuda`, `vaapi` or
 What this speeds up is reading the video, not the measurement: VMAF itself runs
 on the processor in every case. On a 4K file that still helps, because it leaves
 the processor free for the comparison.
+
+### Measuring on the graphics card
+
+FFmpeg has a second comparison filter, `libvmaf_cuda`, which keeps the frames on
+an NVIDIA card from decoding all the way through scoring. MyVidComp uses it when
+it is there, the source is eight-bit 4:2:0, and `--decoder cuda` was asked for by
+name. It is never chosen automatically, because no build MyVidComp can test with
+has it.
+
+No build anyone ships has it, and that is a licensing wall rather than an
+oversight. The filter needs libvmaf compiled with CUDA and FFmpeg configured
+like this:
+
+```sh
+./configure --enable-nonfree --enable-ffnvcodec --enable-libvmaf
+```
+
+`--enable-nonfree` produces a binary that may not be redistributed, so neither
+BtbN, whose builds MyVidComp bundles, nor MyVidComp itself can hand one out.
+Building it yourself works on Linux; on Windows it is an open question, with no
+published recipe.
+
+For an NVIDIA machine the useful setting is therefore `--decoder cuda`, which
+works with the bundled FFmpeg today and moves the decoding, though not the
+scoring, off the processor. Point `--ffmpeg` at your own build if you have one
+with the CUDA filter; MyVidComp will notice and say so.

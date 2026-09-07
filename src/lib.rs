@@ -1082,6 +1082,22 @@ fn run_workflow(
     if let Some(reason) = reason {
         ui.emit_capability_missing("libvmaf", &reason);
     }
+    // Scoring on the card, rather than only decoding on it, needs a filter that
+    // no distributed FFmpeg has: it requires a build configured --enable-nonfree,
+    // which cannot be redistributed. Someone who built their own gets it, and
+    // only when they asked for cuda by name, because nothing here can test it.
+    if support.available
+        && options.decoder_preference == DecoderPreference::Method(HwAccel::Cuda)
+        && decoding.method() == Some(HwAccel::Cuda)
+        && vmaf::detect_vmaf_cuda_support(&options.ffmpeg)
+    {
+        decoding.enable_gpu_scoring();
+        ui.log_info(
+            "Info: this FFmpeg has the CUDA comparison filter, so quality is measured on the graphics card as well as decoded there."
+                .to_string(),
+        );
+    }
+
     // What a file passes through decides how its progress is divided up, and
     // that is settled here so every file's bar is shaped the same way.
     ui.set_phase_weights(
@@ -3925,15 +3941,29 @@ fn measure_quality_with_progress(
         &item.temp_path,
         options.target_codec.ffprobe_name(),
     );
+    // The CUDA filter keeps the frames on the card from decode to score, but it
+    // accepts only eight-bit 4:2:0, so anything else falls back to the ordinary
+    // path rather than failing.
+    let on_gpu = decoding.scores_on_gpu() && vmaf::can_score_on_gpu(&item.video);
     let measure = |methods: (Option<HwAccel>, Option<HwAccel>), ui: &mut ProgressUi| {
-        let args = vmaf::build_vmaf_args(
-            &item.temp_path,
-            &item.input_path,
-            &item.video,
-            vmaf_options,
-            true,
-            methods,
-        );
+        let args = if on_gpu && methods.0.is_some() && methods.1.is_some() {
+            vmaf::build_vmaf_cuda_args(
+                &item.temp_path,
+                &item.input_path,
+                &item.video,
+                vmaf_options,
+                true,
+            )
+        } else {
+            vmaf::build_vmaf_args(
+                &item.temp_path,
+                &item.input_path,
+                &item.video,
+                vmaf_options,
+                true,
+                methods,
+            )
+        };
         run_ffmpeg_streaming(
             &options.ffmpeg,
             &args,

@@ -91,3 +91,24 @@ FFmpeg 中 `n_threads` 默认只用一个线程，对整片来说太慢，因此
 
 被加速的是读取视频，而不是测量本身：VMAF 在任何情况下都跑在处理器上。即便如此，对 4K 文件仍然
 有意义，因为这让处理器腾出手来做比对。
+
+### 在显卡上测量
+
+FFmpeg 还有第二个比对滤镜 `libvmaf_cuda`，它让画面从解码到打分全程留在 NVIDIA 显卡上。当这个滤镜
+存在、源是 8 位 4:2:0，并且明确指定了 `--decoder cuda` 时，MyVidComp 会使用它。它绝不会被自动选
+中，因为 MyVidComp 能用来测试的构建里都没有它。
+
+任何人分发的构建里都没有它，这是许可证造成的门槛，而不是疏忽。这个滤镜需要用 CUDA 编译的 libvmaf，
+并且 FFmpeg 要这样配置：
+
+```sh
+./configure --enable-nonfree --enable-ffnvcodec --enable-libvmaf
+```
+
+`--enable-nonfree` 产出的二进制不允许再分发，所以无论是 MyVidComp 捆绑其构建的 BtbN，还是
+MyVidComp 自己，都无法把它交给别人。自己编译在 Linux 上可行；在 Windows 上则仍是个悬而未决的问题，
+没有公开的做法。
+
+因此对 NVIDIA 机器来说，真正有用的设置是 `--decoder cuda`：它今天就能配合捆绑的 FFmpeg 工作，把解
+码而不是打分从处理器上挪走。如果你自己有带 CUDA 滤镜的构建，用 `--ffmpeg` 指向它即可，MyVidComp
+会发现并说明。
