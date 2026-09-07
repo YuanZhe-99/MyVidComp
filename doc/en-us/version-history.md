@@ -137,3 +137,5 @@ changed in each one.
   cleanly by hardware that has no AV1 decoder, which is exactly what the per-codec check is for.
 - `2026-09-06`: Added FFI version 2 for the decoding setting. Version 1 is untouched and keeps
   working.
+- `2026-09-06`: Released as **MyVidComp 0.1.4**, the first version with an installer and the first
+  signed Android package.
