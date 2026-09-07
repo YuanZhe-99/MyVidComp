@@ -341,6 +341,32 @@ class AppText {
   // AI-FUNC-SUMMARY: Reports how much longer something has to run; returns the phrase; side effects: none.
   String timeLeft(String duration) => _format('timeLeft', {'time': duration});
 
+  // AI-FUNC-SUMMARY: Explains why one file was left alone; returns the sentence, falling back to the engine's own words; side effects: none.
+  String skipReasonLabel(String code, String detail) => switch (code) {
+    'unreadable' => _text('skipUnreadable'),
+    'already_target' => _text('skipAlreadyTarget'),
+    'unreadable_streams' => _text('skipUnreadableStreams'),
+    'unreadable_chapters' => _text('skipUnreadableChapters'),
+    'conflict' => _text('skipConflict'),
+    'pending_review' => _text('skipPendingReview'),
+    'kept_copy' => _text('skipKeptCopy'),
+    _ => detail,
+  };
+
+  // AI-FUNC-SUMMARY: Describes how much smaller a converted file became; returns the sentence; side effects: none.
+  String sizeChange(int sourceBytes, int outputBytes) {
+    final saved = sourceBytes - outputBytes;
+    final percent = sourceBytes > 0 ? (saved / sourceBytes * 100).round() : 0;
+    final change = saved >= 0
+        ? _format('smallerBy', {'percent': '$percent'})
+        : _format('largerBy', {'percent': '${-percent}'});
+    return sizeComparison(
+      formatBytes(sourceBytes),
+      formatBytes(outputBytes),
+      change,
+    );
+  }
+
   // AI-FUNC-SUMMARY: Reports which trial of a quality search is running; returns the phrase; side effects: none.
   String trialOfTotal(int trial, int total) =>
       _format('trialOfTotal', {'trial': '$trial', 'total': '$total'});
@@ -448,6 +474,16 @@ const Map<String, Map<String, String>> _strings = {
     'currentFile': 'Working on',
     'overallProgress': 'All files',
     'timeLeft': '{time} left',
+    'skipUnreadable': 'No video track could be read',
+    'skipAlreadyTarget': 'Already in the chosen format',
+    'skipUnreadableStreams': 'Its track layout could not be read safely',
+    'skipUnreadableChapters':
+        'Its chapter information could not be read safely',
+    'skipConflict': 'A converted file or backup of this name already exists',
+    'skipPendingReview': 'Waiting for you to choose which copy to keep',
+    'skipKeptCopy': 'A kept copy of a file that was already converted',
+    'smallerBy': '{percent}% smaller',
+    'largerBy': '{percent}% larger',
     'trialOfTotal': 'trial {trial} of at most {total}',
     'converted': 'Converted',
     'skipped': 'Left alone',
@@ -610,6 +646,15 @@ const Map<String, Map<String, String>> _strings = {
     'currentFile': '正在处理',
     'overallProgress': '全部文件',
     'timeLeft': '剩余 {time}',
+    'skipUnreadable': '读不到视频轨道',
+    'skipAlreadyTarget': '已经是所选格式',
+    'skipUnreadableStreams': '无法安全读取轨道结构',
+    'skipUnreadableChapters': '无法安全读取章节信息',
+    'skipConflict': '同名的转换结果或备份已存在',
+    'skipPendingReview': '正在等你决定保留哪一份',
+    'skipKeptCopy': '这是已转换文件保留下来的副本',
+    'smallerBy': '小了 {percent}%',
+    'largerBy': '大了 {percent}%',
     'trialOfTotal': '第 {trial} 次试编码，最多 {total} 次',
     'converted': '已转换',
     'skipped': '保持原样',
@@ -754,6 +799,15 @@ const Map<String, Map<String, String>> _strings = {
     'currentFile': '正在處理',
     'overallProgress': '全部檔案',
     'timeLeft': '剩餘 {time}',
+    'skipUnreadable': '讀不到視訊軌',
+    'skipAlreadyTarget': '已經是所選格式',
+    'skipUnreadableStreams': '無法安全讀取軌道結構',
+    'skipUnreadableChapters': '無法安全讀取章節資訊',
+    'skipConflict': '同名的轉換結果或備份已存在',
+    'skipPendingReview': '正在等你決定保留哪一份',
+    'skipKeptCopy': '這是已轉換檔案保留下來的副本',
+    'smallerBy': '小了 {percent}%',
+    'largerBy': '大了 {percent}%',
     'trialOfTotal': '第 {trial} 次試編碼，最多 {total} 次',
     'converted': '已轉換',
     'skipped': '保持原樣',
@@ -898,6 +952,15 @@ const Map<String, Map<String, String>> _strings = {
     'currentFile': '処理中',
     'overallProgress': 'すべてのファイル',
     'timeLeft': '残り {time}',
+    'skipUnreadable': '映像トラックを読み取れません',
+    'skipAlreadyTarget': 'すでに選んだ形式です',
+    'skipUnreadableStreams': 'トラック構成を安全に読み取れません',
+    'skipUnreadableChapters': 'チャプター情報を安全に読み取れません',
+    'skipConflict': '同じ名前の変換結果かバックアップがすでにあります',
+    'skipPendingReview': 'どちらを残すか選ぶのを待っています',
+    'skipKeptCopy': '変換済みファイルの控えです',
+    'smallerBy': '{percent}% 小さくなりました',
+    'largerBy': '{percent}% 大きくなりました',
     'trialOfTotal': '試験変換 {trial} 回目（最大 {total} 回）',
     'converted': '変換済み',
     'skipped': 'そのまま',

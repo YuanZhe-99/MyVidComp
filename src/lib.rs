@@ -286,7 +286,11 @@ pub enum Event {
     },
     FileSkipped {
         path: PathBuf,
+        /// Why it was skipped, in English, for the terminal and the log.
         reason: String,
+        /// The same reason as a stable value, so an interface can say it in
+        /// the language the person is reading.
+        reason_code: String,
     },
     FileStarted {
         index: usize,
@@ -528,10 +532,15 @@ fn event_json(event: &Event) -> String {
                 .join(","),
             skipped
         ),
-        Event::FileSkipped { path, reason } => format!(
-            "{{\"type\":\"file_skipped\",\"path\":{},\"reason\":{}}}",
+        Event::FileSkipped {
+            path,
+            reason,
+            reason_code,
+        } => format!(
+            "{{\"type\":\"file_skipped\",\"path\":{},\"reason\":{},\"reason_code\":{}}}",
             json_path(path),
-            json_string(reason)
+            json_string(reason),
+            json_string(reason_code)
         ),
         Event::FileStarted {
             index,
@@ -940,6 +949,7 @@ fn run_workflow(
             events.on_event(Event::FileSkipped {
                 path,
                 reason: "kept copy of an already converted file".to_string(),
+                reason_code: "kept_copy".to_string(),
             });
             continue;
         }
@@ -953,6 +963,7 @@ fn run_workflow(
             events.on_event(Event::FileSkipped {
                 path,
                 reason: "waiting for you to choose which copy to keep".to_string(),
+                reason_code: "pending_review".to_string(),
             });
             continue;
         }
@@ -1069,7 +1080,11 @@ fn run_workflow(
 
         let Some(video) = probe_video(&options.ffprobe, &candidate.input_path)? else {
             summary.skipped += 1;
-            ui.emit_file_skipped(&candidate.input_path, "no readable video stream");
+            ui.emit_file_skipped(
+                &candidate.input_path,
+                "no readable video stream",
+                "unreadable",
+            );
             continue;
         };
 
@@ -1081,6 +1096,7 @@ fn run_workflow(
             ui.emit_file_skipped(
                 &candidate.input_path,
                 &format!("already {}", options.target_codec.label()),
+                "already_target",
             );
             continue;
         }
@@ -1092,6 +1108,7 @@ fn run_workflow(
                 ui.emit_file_skipped(
                     &candidate.input_path,
                     &format!("cannot safely inspect stream layout: {err}"),
+                    "unreadable_streams",
                 );
                 continue;
             }
@@ -1103,6 +1120,7 @@ fn run_workflow(
                 ui.emit_file_skipped(
                     &candidate.input_path,
                     &format!("cannot safely inspect chapter metadata: {err}"),
+                    "unreadable_chapters",
                 );
                 continue;
             }
@@ -1117,7 +1135,11 @@ fn run_workflow(
             Ok(item) => item,
             Err(reason) => {
                 summary.skipped += 1;
-                ui.emit_file_skipped(&candidate.input_path, &skip_reason_label(&reason));
+                ui.emit_file_skipped(
+                    &candidate.input_path,
+                    &skip_reason_label(&reason),
+                    skip_reason_code(&reason),
+                );
                 continue;
             }
         };
@@ -2140,6 +2162,14 @@ impl WorkItem {
 enum SkipReason {
     Conflict,
     UnsafeReplacement(String),
+}
+
+// AI-FUNC-SUMMARY: Maps an internal skip reason to its stable wire value; returns the code an interface can translate; side effects: none.
+fn skip_reason_code(reason: &SkipReason) -> &'static str {
+    match reason {
+        SkipReason::Conflict => "conflict",
+        SkipReason::UnsafeReplacement(_) => "unsafe_replacement",
+    }
 }
 
 // AI-FUNC-SUMMARY: Formats an internal skip reason for user and GUI reporting; returns a human-readable message; side effects: none.
@@ -6131,7 +6161,9 @@ impl<'a> ProgressUi<'a> {
         let encoder = plan.encoder;
         let plan_kind = plan.kind;
         self.wait_until_prompt_inactive();
-        self.file_started_at = Instant::now();
+        // The file's clock keeps running across attempts: it is what the time
+        // left is extrapolated from, and restarting it here made a retry look
+        // nearly finished.
         let quality = plan.quality.label(encoder.kind);
         self.last_encoder = encoder.name.clone();
         self.last_quality = quality.clone();
@@ -6314,10 +6346,11 @@ impl<'a> ProgressUi<'a> {
     }
 
     // AI-FUNC-SUMMARY: Emits a file-skipped event; returns none; side effects: sends a structured event.
-    fn emit_file_skipped(&mut self, path: &Path, reason: &str) {
+    fn emit_file_skipped(&mut self, path: &Path, reason: &str, reason_code: &str) {
         self.events.on_event(Event::FileSkipped {
             path: path.to_path_buf(),
             reason: reason.to_string(),
+            reason_code: reason_code.to_string(),
         });
         // A skipped candidate is one the run is finished with, so the run's
         // own progress moves even though nothing was converted.

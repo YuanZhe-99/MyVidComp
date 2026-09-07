@@ -223,9 +223,9 @@ class _FileRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(record.name, style: theme.textTheme.bodyMedium),
-                if (record.detail.isNotEmpty)
+                if (_detail(text, record).isNotEmpty)
                   Text(
-                    record.detail,
+                    _detail(text, record),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -244,6 +244,21 @@ class _FileRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// AI-FUNC-SUMMARY: Writes what happened to one file in the reader's language; returns the sentence, falling back to the engine's words; side effects: none.
+String _detail(AppText text, FileRecord record) {
+  final source = record.sourceBytes;
+  final output = record.outputBytes;
+  if (record.outcome == FileOutcome.converted &&
+      source != null &&
+      output != null) {
+    return text.sizeChange(source, output);
+  }
+  if (record.outcome == FileOutcome.skipped) {
+    return text.skipReasonLabel(record.detailCode, record.detail);
+  }
+  return record.detail;
 }
 
 class _DetailsLog extends StatelessWidget {

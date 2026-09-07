@@ -4,6 +4,7 @@ import 'package:myvidcomp_gui/app_controller.dart';
 import 'package:myvidcomp_gui/app_localizations.dart';
 import 'package:myvidcomp_gui/app_settings.dart';
 import 'package:myvidcomp_gui/core_ffi.dart';
+import 'package:myvidcomp_gui/formatting.dart';
 import 'package:myvidcomp_gui/main.dart';
 import 'package:myvidcomp_gui/media_tools.dart';
 
@@ -69,6 +70,7 @@ Future<void> _scrollTo(WidgetTester tester, Finder target) async {
 
 void main() {
   _progressTests();
+  _wordingTests();
 
   group('wording', () {
     test('every language defines exactly the same keys', () {
@@ -514,6 +516,53 @@ void _progressTests() {
       );
 
       expect(controller.log.single.level, LogLevel.warning);
+    });
+  });
+}
+
+void _wordingTests() {
+  group('readable output', () {
+    test('a skipped file is explained in every language', () {
+      const codes = [
+        'unreadable',
+        'already_target',
+        'unreadable_streams',
+        'unreadable_chapters',
+        'conflict',
+        'pending_review',
+        'kept_copy',
+      ];
+
+      for (final code in ['en', 'zh-Hans', 'zh-Hant', 'ja']) {
+        final text = AppText.forCode(code);
+        for (final reason in codes) {
+          final sentence = text.skipReasonLabel(reason, 'raw engine text');
+          expect(sentence, isNot(contains('_')));
+          expect(sentence, isNot(equals(reason)));
+          expect(sentence, isNot(equals('raw engine text')));
+        }
+        // An unknown code falls back to what the engine said rather than
+        // showing the code itself.
+        expect(text.skipReasonLabel('something_new', 'raw'), 'raw');
+      }
+    });
+
+    test('a converted file describes its own size change', () {
+      final text = AppText.forCode('en');
+      final sentence = text.sizeChange(1000000, 400000);
+
+      expect(sentence, contains('60% smaller'));
+      expect(sentence, isNot(contains('->')));
+      expect(text.sizeChange(400000, 500000), contains('25% larger'));
+    });
+
+    test('times and speeds are formatted once, in one place', () {
+      expect(formatDuration(const Duration(seconds: 65)), '1:05');
+      expect(formatDuration(const Duration(hours: 1, minutes: 2)), '1:02:00');
+      expect(formatSpeed('1.85x'), '1.9×');
+      expect(formatSpeed('N/A'), isEmpty);
+      expect(formatPercent(41.4), '41%');
+      expect(formatScore(9550), '95.5');
     });
   });
 }

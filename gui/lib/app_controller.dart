@@ -65,6 +65,7 @@ class FileRecord {
     required this.name,
     required this.outcome,
     required this.detail,
+    this.detailCode = '',
     this.score,
     this.sourceBytes,
     this.outputBytes,
@@ -72,7 +73,13 @@ class FileRecord {
 
   final String name;
   final FileOutcome outcome;
+
+  /// What the engine said, in English. Shown only when there is no better
+  /// sentence to write from the numbers and the code below.
   final String detail;
+
+  /// A stable reason value the interface can translate.
+  final String detailCode;
 
   /// Measured quality in hundredths, when there is one.
   final int? score;
@@ -392,6 +399,7 @@ class AppController extends ChangeNotifier {
             name: _fileName(data['path'] as String? ?? ''),
             outcome: FileOutcome.skipped,
             detail: data['reason'] as String? ?? '',
+            detailCode: data['reason_code'] as String? ?? '',
           ),
         );
       case WorkerEventType.fileStarted:
@@ -493,7 +501,10 @@ class AppController extends ChangeNotifier {
           FileRecord(
             name: name,
             outcome: FileOutcome.converted,
+            // The sizes are on the wire, so the sentence about them is written
+            // here rather than parsed out of the engine's English.
             detail: message,
+            detailCode: 'converted',
             score: _lastScore,
             sourceBytes: data['source_bytes'] as int?,
             outputBytes: data['output_bytes'] as int?,
@@ -503,7 +514,12 @@ class AppController extends ChangeNotifier {
     } else {
       _failed += 1;
       _records.add(
-        FileRecord(name: name, outcome: FileOutcome.failed, detail: message),
+        FileRecord(
+          name: name,
+          outcome: FileOutcome.failed,
+          detail: message,
+          detailCode: 'failed',
+        ),
       );
     }
     _lastScore = null;
