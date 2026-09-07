@@ -8,10 +8,15 @@ existing one.
 
 | Version | Struct | Entry point |
 |---|---|---|
-| 1 (current) | `FfiRunOptionsV1` (by pointer) | `myvidcomp_run_blocking_v1` |
+| 1 | `FfiRunOptionsV1` (by pointer) | `myvidcomp_run_blocking_v1` |
+| 2 (current) | `FfiRunOptionsV2` (by pointer) | `myvidcomp_run_blocking_v2` |
 
 Version 1 is the first version under this name. The previous project exported three struct
 versions; those are gone, along with the by-value struct that could never be extended safely.
+
+Version 2 adds `decoder_preference`, and embeds version 1 whole rather than repeating its fields,
+so the two layouts cannot drift apart. A caller still using version 1 keeps working and gets the
+default, which is a graphics card when one is proven to work on the file.
 
 Rules:
 
@@ -39,6 +44,7 @@ hundredths of a VMAF point, so 9500 means 95.0. The struct contains no floating-
 |---|---|
 | `myvidcomp_ffi_abi_version` | reports the newest supported version |
 | `myvidcomp_run_blocking_v1` | runs one conversion pass and reports events |
+| `myvidcomp_run_blocking_v2` | the same, for callers that also choose how decoding happens |
 | `myvidcomp_cancellation_token_new` | allocates a cancellation token |
 | `myvidcomp_cancellation_token_request_stop` | requests a graceful stop |
 | `myvidcomp_cancellation_token_free` | frees a cancellation token |
@@ -63,8 +69,11 @@ Events arrive as compact JSON strings with a `type` field. The types are:
 | `scan_started`, `scan_finished` | the folder scan begins and ends |
 | `dry_run` | a preview run lists what it would do |
 | `encoder_candidate_evaluated`, `encoder_selected` | during encoder detection |
+| `decoder_selected` | once, naming the decoding method the run settled on |
 | `file_skipped` | a file was left alone, with the reason |
 | `file_started`, `file_attempt`, `file_progress` | during one file's conversion |
+| `phase` | one phase of a file begins, with its step out of the phase's worst case |
+| `run_progress` | how far the whole run has got, counting skipped files |
 | `quality_search` | one trial of a tuning search |
 | `quality_measured` | a finished conversion was compared with its source |
 | `copy_progress`, `stage` | during long non-encoding steps |

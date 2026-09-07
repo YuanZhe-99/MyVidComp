@@ -18,10 +18,10 @@ skipping.
 
 ## On a version tag
 
-`.github/workflows/release.yml` runs when a `v*` tag is pushed. It builds the two Windows
-packages, the command-line package and the Android package, then refuses to publish unless the tag
-matches the version in `Cargo.toml`, writes one checksum file covering every download, and
-publishes them.
+`.github/workflows/release.yml` runs when a `v*` tag is pushed. It builds the two Windows packages
+and their installers, the command-line package and the Android package, then refuses to publish
+unless the tag matches the version in `Cargo.toml`, writes one checksum file covering every
+download, and publishes them.
 
 The Windows packages bundle the rolling build of the FFmpeg 9.0 series. Dated builds were used
 before, until one was removed by its publisher and stopped a release; the rolling address of a

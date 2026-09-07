@@ -122,6 +122,7 @@ class AppText {
   String get keepOriginalsOff => _text('keepOriginalsOff');
   String get settingsSpeed => _text('settingsSpeed');
   String get whichEncoder => _text('whichEncoder');
+  String get whichDecoder => _text('whichDecoder');
   String get container => _text('container');
   String get qualityStrategy => _text('qualityStrategy');
   String get qualityCheckLabel => _text('qualityCheckLabel');
@@ -210,6 +211,22 @@ class AppText {
     'gpu' => _text('encoderGpu'),
     'cpu' => _text('encoderCpu'),
     _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Names one decoding choice; returns the label; side effects: none.
+  String decoderPreferenceLabel(String value) => switch (value) {
+    'auto' => _text('decoderAuto'),
+    'gpu' => _text('decoderGpu'),
+    'cpu' => _text('decoderCpu'),
+    _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Explains what one decoding choice means; returns the sentence; side effects: none.
+  String decoderPreferenceHelp(String value) => switch (value) {
+    'auto' => _text('decoderAutoHelp'),
+    'gpu' => _text('decoderGpuHelp'),
+    'cpu' => _text('decoderCpuHelp'),
+    _ => '',
   };
 
   // AI-FUNC-SUMMARY: Explains what one encoder preference means; returns the sentence; side effects: none.
@@ -513,6 +530,16 @@ const Map<String, Map<String, String>> _strings = {
     'keepOriginalsOff': 'Replace originals once verified',
     'settingsSpeed': 'Speed',
     'whichEncoder': 'Which hardware to use',
+    'whichDecoder': 'Reading the video',
+    'decoderAuto': 'Graphics card when it works',
+    'decoderAutoHelp':
+        'Reads the video with the graphics card when it is proven to work on the file, and with the processor otherwise. Falls back on its own if anything goes wrong.',
+    'decoderGpu': 'Graphics card',
+    'decoderGpuHelp':
+        'Asks for the graphics card and says so when none can be used. It still falls back rather than failing a file.',
+    'decoderCpu': 'Processor',
+    'decoderCpuHelp':
+        'Never uses the graphics card. Slower on large files, and the choice to make when a quality score has to come out the same on every machine.',
     'container': 'File type',
     'qualityStrategy': 'How to reach the quality target',
     'qualityCheckLabel': 'Quality check',
@@ -682,6 +709,13 @@ const Map<String, Map<String, String>> _strings = {
     'keepOriginalsOff': '校验通过后替换原文件',
     'settingsSpeed': '速度',
     'whichEncoder': '使用哪种硬件',
+    'whichDecoder': '读取视频的方式',
+    'decoderAuto': '能用显卡就用',
+    'decoderAutoHelp': '在确认显卡能读这个文件时用显卡读，否则用处理器。一旦出问题会自动退回处理器。',
+    'decoderGpu': '显卡',
+    'decoderGpuHelp': '优先使用显卡，用不了时会明确说明。即使这样也只会退回处理器，不会让文件失败。',
+    'decoderCpu': '处理器',
+    'decoderCpuHelp': '完全不用显卡。大文件会慢一些，但画质分数在任何机器上都能得到同样的数值。',
     'container': '文件类型',
     'qualityStrategy': '如何达到画质目标',
     'qualityCheckLabel': '画质检查',
@@ -835,6 +869,13 @@ const Map<String, Map<String, String>> _strings = {
     'keepOriginalsOff': '驗證通過後取代原檔案',
     'settingsSpeed': '速度',
     'whichEncoder': '使用哪種硬體',
+    'whichDecoder': '讀取影片的方式',
+    'decoderAuto': '能用顯示卡就用',
+    'decoderAutoHelp': '在確認顯示卡能讀這個檔案時用顯示卡讀，否則用處理器。一旦出問題會自動退回處理器。',
+    'decoderGpu': '顯示卡',
+    'decoderGpuHelp': '優先使用顯示卡，用不了時會明確說明。即使如此也只會退回處理器，不會讓檔案失敗。',
+    'decoderCpu': '處理器',
+    'decoderCpuHelp': '完全不用顯示卡。大檔案會慢一些，但畫質分數在任何機器上都能得到同樣的數值。',
     'container': '檔案類型',
     'qualityStrategy': '如何達到畫質目標',
     'qualityCheckLabel': '畫質檢查',
@@ -988,6 +1029,15 @@ const Map<String, Map<String, String>> _strings = {
     'keepOriginalsOff': '確認後に元のファイルを置き換える',
     'settingsSpeed': '速度',
     'whichEncoder': '使用するハードウェア',
+    'whichDecoder': '映像の読み取り方',
+    'decoderAuto': '使えるならグラフィックス',
+    'decoderAutoHelp':
+        'そのファイルで確実に動くと分かったときだけグラフィックスで読み取り、それ以外はプロセッサーで読み取ります。問題が起きれば自動で戻ります。',
+    'decoderGpu': 'グラフィックス',
+    'decoderGpuHelp':
+        'グラフィックスを優先し、使えないときはその旨を伝えます。その場合もプロセッサーに戻すだけで、変換は失敗しません。',
+    'decoderCpu': 'プロセッサー',
+    'decoderCpuHelp': 'グラフィックスを使いません。大きなファイルでは遅くなりますが、画質スコアはどの機械でも同じ値になります。',
     'container': 'ファイル形式',
     'qualityStrategy': '目標画質への近づけ方',
     'qualityCheckLabel': '画質チェック',

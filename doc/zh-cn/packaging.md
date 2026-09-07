@@ -13,6 +13,22 @@
 
 双包脚本用 Flutter 构建宿主目标，用同一 Visual Studio CMake 生成器构建另一目标。每个包包含 Flutter 发布包、匹配的 `myvidcomp_core.dll`、`bin/ffmpeg.exe`、`bin/ffprobe.exe`、README 文件和 `SHA256SUMS.txt`。
 
+## 安装程序
+
+每个架构还会附带一个安装程序，由 Inno Setup 从同一个 `installer.iss` 构建，通过 `ARM64` 符号切换，
+和这里其他项目的做法一致。它打包的是暂存好的安装包目录，而不是 Flutter 的原始输出，因此安装程序和
+zip 里的内容完全一致。
+
+它按当前用户安装到 `{autopf}`，不会请求管理员权限。`AppId` 这个 GUID 永远不能更改：Windows 靠它
+识别升级，换一个就会在原有副本旁边再装一份。
+
+版本号是传进去的，而不是写死在脚本里：
+
+```powershell
+scripts/package-gui-windows.ps1 -Platform x64 -DownloadFfmpeg
+scripts/package-gui-windows-installer.ps1 -Platform x64
+```
+
 ## FFmpeg 捆绑
 
 - 包布局为相对路径：`bin/ffmpeg.exe` 与 `bin/ffprobe.exe`。绝不把开发者机器的绝对路径写入包文件。

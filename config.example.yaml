@@ -34,6 +34,11 @@ review_margin: 2
 # Which encoders to prefer: auto, gpu or cpu.
 encoder_preference: auto
 
+# How the source is read: auto uses a graphics card when one is proven to work
+# on the file, cpu never does, and a method name such as d3d11va or cuda picks
+# one. cpu is the setting to keep when a score has to match on another machine.
+decoder_preference: auto
+
 # Container: mp4, or mkv-fallback to use MKV when a stream will not fit.
 output_format: mp4
 

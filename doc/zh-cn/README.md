@@ -32,7 +32,7 @@
 ## 当前状态
 
 Rust 核心是 `src/lib.rs`，加上几个能独立成章的部分各自的模块：`options.rs`、`codec.rs`、`vmaf.rs`、
-`search.rs`、`review.rs` 和 `ffi.rs`。应用程序位于 `gui/`，用同一套源码为 Windows、macOS、Linux 和
+`decode.rs`、`progress.rs`、`search.rs`、`review.rs` 和 `ffi.rs`。应用程序位于 `gui/`，用同一套源码为 Windows、macOS、Linux 和
 Android 构建。
 
 本文档树描述 0.1.4 版本：三种输出编码、用 VMAF 测量画质、带复核的平衡严格程度，以及单版本嵌入 ABI。

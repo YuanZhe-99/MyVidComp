@@ -85,6 +85,23 @@ across: `consistency` becomes `auto`, `hardware` becomes `gpu`.
 `--encoder NAME` pins one specific encoder. It is never swapped for another,
 although it may retry with a converted pixel format.
 
+## Decoding
+
+| Wire value | Shown as | Meaning |
+|---|---|---|
+| `auto` (default) | Graphics card when it works | Graphics card once it is proven on the file, processor otherwise. |
+| `gpu` | Graphics card | Asks for one and says so when none can be used. |
+| `cpu` | Processor | Never uses a graphics card. Scores match on any machine. |
+
+Set with `--decoder` or the `decoder_preference` config key. A method name such
+as `d3d11va`, `dxva2`, `cuda`, `qsv`, `vaapi`, `videotoolbox` or `mediacodec`
+picks exactly one and nothing else.
+
+This is about reading the video, not encoding it; the two are separate settings
+because a machine can be good at one and not the other. See
+[quality.md](quality.md) for how a method is proven and what happens when one
+fails.
+
 ## Container
 
 | Wire value | Shown as | Meaning |

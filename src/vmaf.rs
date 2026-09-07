@@ -10,8 +10,8 @@ use std::path::Path;
 use std::process::Stdio;
 
 use super::{
-    PROGRESS_ARGS, VideoInfo, first_error_line, normalized_pix_fmt, pixel_format_bit_depth,
-    process_command,
+    HwAccel, PROGRESS_ARGS, VideoInfo, first_error_line, normalized_pix_fmt,
+    pixel_format_bit_depth, process_command,
 };
 
 /// A measured quality score, kept in hundredths of a VMAF point so it can cross
@@ -141,6 +141,10 @@ pub fn build_vmaf_args(
     video: &VideoInfo,
     options: VmafOptions,
     progress: bool,
+    // One method per input, because the two files are in different codecs: the
+    // converted one is in the target codec, and hardware that decodes the
+    // source may refuse what was just produced from it.
+    accel: (Option<HwAccel>, Option<HwAccel>),
 ) -> Vec<String> {
     let format = comparison_pixel_format(video);
     let model = model_for(video);
@@ -178,13 +182,22 @@ pub fn build_vmaf_args(
         // the null muxer opens no file, so stdout is free for the report.
         args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
     }
+    // -hwaccel is a per-input option, so it goes before each of the two files.
+    // What must never appear is -hwaccel_output_format: leaving it out is what
+    // makes ffmpeg copy decoded frames back into ordinary memory, which is
+    // where the filter and the format conversion below need them.
+    let mut input = |path: &Path, accel: Option<HwAccel>| {
+        if let Some(accel) = accel {
+            args.push("-hwaccel".to_string());
+            args.push(accel.as_str().to_string());
+        }
+        args.push("-i".to_string());
+        args.push(path.to_string_lossy().to_string());
+    };
+    input(distorted, accel.0);
+    input(reference, accel.1);
+
     args.extend([
-        // No -hwaccel here: the filter needs frames in system memory, and a
-        // decoder that hands back hardware frames makes the graph fail.
-        "-i".to_string(),
-        distorted.to_string_lossy().to_string(),
-        "-i".to_string(),
-        reference.to_string_lossy().to_string(),
         "-lavfi".to_string(),
         filter,
         "-f".to_string(),
@@ -310,6 +323,7 @@ mod tests {
                 threads: 4,
             },
             false,
+            (None, None),
         );
 
         let joined = args.join(" ");
@@ -339,6 +353,7 @@ mod tests {
             &video(1920, 1080, "yuv420p"),
             VmafOptions::default(),
             true,
+            (None, None),
         );
 
         let joined = args.join(" ");
@@ -366,6 +381,64 @@ mod tests {
 
         let scoreless = score_from_output(true, "nothing useful\n", 1).unwrap_err();
         assert_eq!(scoreless, "quality measurement produced no score");
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies each input gets its own decoder and that frames still come back to ordinary memory; returns nothing; side effects: none.
+    fn puts_a_decoder_before_each_input() {
+        let args = build_vmaf_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/clip.mkv"),
+            &video(1920, 1080, "yuv420p"),
+            VmafOptions::default(),
+            false,
+            (None, Some(HwAccel::D3d11va)),
+        );
+
+        let joined = args.join(" ");
+        // Without this the filter receives frames the graphics card still owns,
+        // and the comparison fails outright.
+        assert!(!joined.contains("-hwaccel_output_format"));
+        assert_eq!(args.iter().filter(|arg| *arg == "-hwaccel").count(), 1);
+
+        let accel = args.iter().position(|arg| arg == "-hwaccel").unwrap();
+        let reference = args
+            .iter()
+            .position(|arg| arg == "/videos/clip.mkv")
+            .unwrap();
+        assert_eq!(accel + 2, reference - 1);
+
+        let both = build_vmaf_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/clip.mkv"),
+            &video(1920, 1080, "yuv420p"),
+            VmafOptions::default(),
+            false,
+            (Some(HwAccel::Cuda), Some(HwAccel::Cuda)),
+        );
+        assert_eq!(both.iter().filter(|arg| *arg == "-hwaccel").count(), 2);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies the comparison itself does not depend on how the frames were decoded; returns nothing; side effects: none.
+    fn the_filter_is_the_same_either_way() {
+        let filter_of = |accel| {
+            let args = build_vmaf_args(
+                Path::new("/tmp/out.mp4"),
+                Path::new("/videos/clip.mkv"),
+                &video(3840, 2160, "yuv420p10le"),
+                VmafOptions::default(),
+                false,
+                accel,
+            );
+            let index = args.iter().position(|arg| arg == "-lavfi").unwrap();
+            args[index + 1].clone()
+        };
+
+        assert_eq!(
+            filter_of((None, None)),
+            filter_of((Some(HwAccel::D3d11va), Some(HwAccel::Cuda)))
+        );
     }
 
     #[test]

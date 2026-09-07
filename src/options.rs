@@ -362,3 +362,196 @@ pub fn parse_quality_points(value: &str) -> Result<u32, String> {
     }
     Ok((parsed * 100.0).round() as u32)
 }
+
+/// One of FFmpeg's hardware decoding methods, named the way FFmpeg names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HwAccel {
+    D3d11va,
+    D3d12va,
+    Dxva2,
+    Cuda,
+    Qsv,
+    Vaapi,
+    VideoToolbox,
+    MediaCodec,
+    Vulkan,
+}
+
+impl HwAccel {
+    // AI-FUNC-SUMMARY: Maps a decoding method to the name ffmpeg knows it by; returns static label; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HwAccel::D3d11va => "d3d11va",
+            HwAccel::D3d12va => "d3d12va",
+            HwAccel::Dxva2 => "dxva2",
+            HwAccel::Cuda => "cuda",
+            HwAccel::Qsv => "qsv",
+            HwAccel::Vaapi => "vaapi",
+            HwAccel::VideoToolbox => "videotoolbox",
+            HwAccel::MediaCodec => "mediacodec",
+            HwAccel::Vulkan => "vulkan",
+        }
+    }
+}
+
+/// Every method that can be named, in a fixed order for error messages.
+pub const HW_ACCELS: [HwAccel; 9] = [
+    HwAccel::D3d11va,
+    HwAccel::D3d12va,
+    HwAccel::Dxva2,
+    HwAccel::Cuda,
+    HwAccel::Qsv,
+    HwAccel::Vaapi,
+    HwAccel::VideoToolbox,
+    HwAccel::MediaCodec,
+    HwAccel::Vulkan,
+];
+
+/// Whether decoding may happen on a graphics card.
+///
+/// Decoding is what reads the source, both while converting it and while
+/// measuring the result. Doing it on a graphics card frees the processor for
+/// the encode and for the quality measurement itself, which stays on the
+/// processor in every case.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DecoderPreference {
+    /// Use a graphics card when one is proven to work on this file, and the
+    /// processor otherwise.
+    #[default]
+    Auto,
+    /// Ask for a graphics card and say so when none can be used.
+    Gpu,
+    /// Never use a graphics card. The setting to choose when a score has to be
+    /// reproducible on another machine.
+    Cpu,
+    /// Use exactly this method and nothing else.
+    Method(HwAccel),
+}
+
+impl DecoderPreference {
+    // AI-FUNC-SUMMARY: Maps a decoder preference to its stable wire value; returns the value, which for an explicit choice is the method name; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DecoderPreference::Auto => "auto",
+            DecoderPreference::Gpu => "gpu",
+            DecoderPreference::Cpu => "cpu",
+            DecoderPreference::Method(method) => method.as_str(),
+        }
+    }
+
+    // AI-FUNC-SUMMARY: Maps a decoder preference to its human-readable log label; returns the label; side effects: none.
+    pub fn label(&self) -> String {
+        match self {
+            DecoderPreference::Auto => "a graphics card when one works".to_string(),
+            DecoderPreference::Gpu => "a graphics card".to_string(),
+            DecoderPreference::Cpu => "the processor".to_string(),
+            DecoderPreference::Method(method) => method.as_str().to_string(),
+        }
+    }
+
+    // AI-FUNC-SUMMARY: Reports whether this preference allows a graphics card at all; returns true unless decoding is pinned to the processor; side effects: none.
+    pub fn allows_hardware(&self) -> bool {
+        !matches!(self, DecoderPreference::Cpu)
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses a decoder-preference wire value; returns the preference or a user-facing error; side effects: none.
+pub fn parse_decoder_preference(value: &str) -> Result<DecoderPreference, String> {
+    let trimmed = value.trim().to_ascii_lowercase();
+    match trimmed.as_str() {
+        "auto" => return Ok(DecoderPreference::Auto),
+        "gpu" | "hardware" => return Ok(DecoderPreference::Gpu),
+        "cpu" | "software" | "none" => return Ok(DecoderPreference::Cpu),
+        _ => {}
+    }
+
+    HW_ACCELS
+        .iter()
+        .find(|method| method.as_str() == trimmed)
+        .map(|method| DecoderPreference::Method(*method))
+        .ok_or_else(|| {
+            let names = HW_ACCELS
+                .iter()
+                .map(|method| method.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "invalid decoder preference: {value}. Supported values: auto, gpu, cpu, {names}"
+            )
+        })
+}
+
+// AI-FUNC-SUMMARY: Normalizes an optional decoder-preference value; returns none for blank or default, and a parsed preference otherwise; side effects: none.
+pub fn normalize_decoder_preference_choice(
+    value: &str,
+) -> Result<Option<DecoderPreference>, String> {
+    // Unlike the codec, `auto` is a real choice here rather than "not set", so
+    // only a blank or the word default means the caller said nothing.
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        Ok(None)
+    } else {
+        parse_decoder_preference(trimmed).map(Some)
+    }
+}
+
+#[cfg(test)]
+mod decoder_tests {
+    use super::*;
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies every decoder preference parses, including each method name; returns nothing; side effects: none.
+    fn parses_a_decoder_preference() {
+        assert_eq!(
+            parse_decoder_preference("auto"),
+            Ok(DecoderPreference::Auto)
+        );
+        assert_eq!(
+            parse_decoder_preference(" GPU "),
+            Ok(DecoderPreference::Gpu)
+        );
+        assert_eq!(
+            parse_decoder_preference("software"),
+            Ok(DecoderPreference::Cpu)
+        );
+        for method in HW_ACCELS {
+            assert_eq!(
+                parse_decoder_preference(method.as_str()),
+                Ok(DecoderPreference::Method(method))
+            );
+        }
+
+        let error = parse_decoder_preference("h264_cuvid").unwrap_err();
+        assert!(error.contains("Supported values"));
+        assert!(error.contains("d3d11va"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies auto is a real choice here rather than the absence of one; returns nothing; side effects: none.
+    fn auto_is_a_choice_not_a_blank() {
+        // The codec treats `auto` as "not set"; here it means "decide per file",
+        // so routing this through that helper would silently lose the setting.
+        assert_eq!(normalize_decoder_preference_choice(""), Ok(None));
+        assert_eq!(normalize_decoder_preference_choice("default"), Ok(None));
+        assert_eq!(
+            normalize_decoder_preference_choice("auto"),
+            Ok(Some(DecoderPreference::Auto))
+        );
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies each preference round-trips through its wire value; returns nothing; side effects: none.
+    fn wire_values_round_trip() {
+        let cases = [
+            DecoderPreference::Auto,
+            DecoderPreference::Gpu,
+            DecoderPreference::Cpu,
+            DecoderPreference::Method(HwAccel::Cuda),
+        ];
+        for case in cases {
+            assert_eq!(parse_decoder_preference(case.as_str()), Ok(case));
+        }
+        assert!(DecoderPreference::Auto.allows_hardware());
+        assert!(!DecoderPreference::Cpu.allows_hardware());
+    }
+}

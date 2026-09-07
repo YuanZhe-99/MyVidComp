@@ -132,8 +132,12 @@ these are the load-bearing summary rules:
   applies `CREATE_NO_WINDOW`.
 - `scripts/package-gui-windows-all.ps1` is the supported dual-architecture release entry point;
   keep explicit `arm64`/`x64` build-directory selection and PE machine validation.
-- Never re-enable hardware-accelerated decoding on the input side. It crashed ffmpeg outright
-  on roughly one run in six during testing, losing a whole file's work.
+- Hardware decoding is never asked for automatically by ffmpeg. Name one method, prove it by
+  creating its device and decoding two frames of the real file, retry on the processor when it
+  fails, and stop using it for the rest of the run. `-hwaccel auto` was what crashed ffmpeg on
+  roughly one run in six in 2026-09 testing, and a crash must never cost more than one encode.
+- Never pass `-hwaccel_output_format` to a quality measurement. The comparison filter needs
+  frames in ordinary memory, and leaving that option out is what brings them back.
 - A conversion the tool is not confident about is kept beside its original, never committed
   over it. Both files survive until the user decides.
 

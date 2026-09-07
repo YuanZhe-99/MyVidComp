@@ -315,6 +315,7 @@ class AppController extends ChangeNotifier {
       tmpDir: _settings.tmpDir,
       encoder: _settings.encoder,
       encoderPreference: _settings.encoderPreference,
+      decoderPreference: _settings.decoderPreference,
       outputFormat: _settings.container,
       targetCodec: _settings.codec,
       preservation: _settings.preservation,

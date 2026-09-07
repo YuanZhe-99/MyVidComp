@@ -18,6 +18,23 @@ The dual-package script builds the host target with Flutter and the other target
 Visual Studio CMake generator. Each package contains the Flutter release bundle, matching
 `myvidcomp_core.dll`, `bin/ffmpeg.exe`, `bin/ffprobe.exe`, README files, and `SHA256SUMS.txt`.
 
+## Installer
+
+Each architecture also ships an installer, built with Inno Setup from one `installer.iss` that
+switches on an `ARM64` symbol, exactly as the sibling projects here do. It wraps the staged package
+folder rather than the raw Flutter output, so the installer and the zip carry the same tree.
+
+It installs for the current user, into `{autopf}`, so nothing asks for an administrator. The `AppId`
+GUID must never change: Windows recognises an upgrade by it, and a new one would install a second
+copy beside the first.
+
+The version is passed in rather than written into the script:
+
+```powershell
+scripts/package-gui-windows.ps1 -Platform x64 -DownloadFfmpeg
+scripts/package-gui-windows-installer.ps1 -Platform x64
+```
+
 ## FFmpeg bundling
 
 - Package layout is relative: `bin/ffmpeg.exe` and `bin/ffprobe.exe`. Never write

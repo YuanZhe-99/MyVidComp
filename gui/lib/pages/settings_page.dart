@@ -102,6 +102,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   update(settings.copyWith(encoderPreference: value)),
             ),
             ChoiceField<String>(
+              label: text.whichDecoder,
+              value: settings.decoderPreference,
+              values: decoderPreferenceChoices,
+              labelFor: text.decoderPreferenceLabel,
+              helpFor: text.decoderPreferenceHelp,
+              enabled: !running,
+              onChanged: (value) =>
+                  update(settings.copyWith(decoderPreference: value)),
+            ),
+            ChoiceField<String>(
               label: text.qualityStrategy,
               value: settings.qualityMode,
               values: qualityModeChoices,

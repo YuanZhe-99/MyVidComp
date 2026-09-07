@@ -20,13 +20,15 @@ something, it keeps both files and asks you which to keep.
 
 ## Install
 
-Download a release for your system, unpack it, and run it. Nothing else is needed: the media tools
-come in the package.
+Download a release for your system and run the installer, or unpack the zip and run it from there.
+Nothing else is needed: the media tools come in the package.
 
 | Package | For |
 |---|---|
-| `MyVidComp-windows-x64.zip` | Windows on Intel or AMD |
-| `MyVidComp-windows-arm64.zip` | Windows on Arm |
+| `MyVidComp_*_Setup.exe` | Windows on Intel or AMD, installed |
+| `MyVidComp_*_arm64_Setup.exe` | Windows on Arm, installed |
+| `MyVidComp-windows-x64.zip` | Windows on Intel or AMD, unpacked anywhere |
+| `MyVidComp-windows-arm64.zip` | Windows on Arm, unpacked anywhere |
 | `myvidcomp-cli-*.zip` | The command-line tool on its own |
 | `MyVidComp-android-arm64.apk` | Android phones and tablets |
 

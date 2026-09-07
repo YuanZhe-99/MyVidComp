@@ -41,6 +41,14 @@ final class FfiRunOptionsV1 extends Struct {
   external int dryRun;
 }
 
+/// Run options for ABI version 2, mirroring `FfiRunOptionsV2` in the Rust core.
+///
+/// Version 1 comes first, whole, then the one field version 2 adds.
+final class FfiRunOptionsV2 extends Struct {
+  external FfiRunOptionsV1 v1;
+  external Pointer<Char> decoderPreference;
+}
+
 typedef _NativeEventCallback =
     Void Function(Pointer<Char> json, Pointer<Void> userData);
 
@@ -54,6 +62,21 @@ typedef _RunBlockingNative =
 typedef _RunBlockingDart =
     Pointer<Char> Function(
       Pointer<FfiRunOptionsV1> options,
+      Pointer<NativeFunction<_NativeEventCallback>> callback,
+      Pointer<Void> userData,
+      Pointer<Void> token,
+    );
+
+typedef _RunBlockingV2Native =
+    Pointer<Char> Function(
+      Pointer<FfiRunOptionsV2> options,
+      Pointer<NativeFunction<_NativeEventCallback>> callback,
+      Pointer<Void> userData,
+      Pointer<Void> token,
+    );
+typedef _RunBlockingV2Dart =
+    Pointer<Char> Function(
+      Pointer<FfiRunOptionsV2> options,
       Pointer<NativeFunction<_NativeEventCallback>> callback,
       Pointer<Void> userData,
       Pointer<Void> token,
@@ -91,6 +114,7 @@ class RunRequest {
     required this.tmpDir,
     required this.encoder,
     required this.encoderPreference,
+    required this.decoderPreference,
     required this.outputFormat,
     required this.targetCodec,
     required this.preservation,
@@ -109,6 +133,7 @@ class RunRequest {
   final String tmpDir;
   final String encoder;
   final String encoderPreference;
+  final String decoderPreference;
   final String outputFormat;
   final String targetCodec;
   final String preservation;
@@ -132,6 +157,7 @@ class RunRequest {
     'tmpDir': tmpDir,
     'encoder': encoder,
     'encoderPreference': encoderPreference,
+    'decoderPreference': decoderPreference,
     'outputFormat': outputFormat,
     'targetCodec': targetCodec,
     'preservation': preservation,
@@ -153,6 +179,7 @@ class RunRequest {
         tmpDir: message['tmpDir']! as String,
         encoder: message['encoder']! as String,
         encoderPreference: message['encoderPreference']! as String,
+        decoderPreference: message['decoderPreference']! as String,
         outputFormat: message['outputFormat']! as String,
         targetCodec: message['targetCodec']! as String,
         preservation: message['preservation']! as String,
@@ -323,6 +350,13 @@ class _CoreLibrary {
           'myvidcomp_run_blocking_v1',
         ),
       ),
+      // A library older than this build exports only version 1, so the newer
+      // entry point is looked up separately and may simply not be there.
+      _runBlockingV2 = _guard(
+        () => library.lookupFunction<_RunBlockingV2Native, _RunBlockingV2Dart>(
+          'myvidcomp_run_blocking_v2',
+        ),
+      ),
       _tokenNew = _guard(
         () => library.lookupFunction<_TokenNewNative, _TokenNewDart>(
           'myvidcomp_cancellation_token_new',
@@ -356,6 +390,7 @@ class _CoreLibrary {
 
   final _AbiVersionDart? _abiVersion;
   final _RunBlockingDart? _runBlocking;
+  final _RunBlockingV2Dart? _runBlockingV2;
   final _TokenNewDart? _tokenNew;
   final _TokenVoidDart? _tokenStop;
   final _TokenVoidDart? _tokenFree;
@@ -396,12 +431,18 @@ class _CoreLibrary {
     Pointer<NativeFunction<_NativeEventCallback>> callback,
     Pointer<Void> token,
   ) {
+    final runV2 = _runBlockingV2;
     final run = _runBlocking;
-    if (run == null) {
+    if (runV2 == null && run == null) {
       return 'This copy of MyVidComp is missing its conversion engine.';
     }
 
-    final options = calloc<FfiRunOptionsV1>();
+    // Version 2 carries the decoding choice. Against an older library only
+    // version 1 exists, and that run decides decoding for itself.
+    final optionsV2 = runV2 == null ? nullptr : calloc<FfiRunOptionsV2>();
+    final options = runV2 == null
+        ? calloc<FfiRunOptionsV1>()
+        : Pointer<FfiRunOptionsV1>.fromAddress(optionsV2.address);
     final strings = <Pointer<Char>>[];
 
     Pointer<Char> text(String value) {
@@ -412,8 +453,10 @@ class _CoreLibrary {
 
     try {
       options.ref
-        ..abiVersion = 1
-        ..structSize = sizeOf<FfiRunOptionsV1>()
+        ..abiVersion = runV2 == null ? 1 : 2
+        ..structSize = runV2 == null
+            ? sizeOf<FfiRunOptionsV1>()
+            : sizeOf<FfiRunOptionsV2>()
         ..targetFolder = text(request.targetFolder)
         ..ffmpeg = text(request.ffmpeg)
         ..ffprobe = text(request.ffprobe)
@@ -431,8 +474,13 @@ class _CoreLibrary {
         ..qualityThreads = 0
         ..keepOriginal = request.keepOriginal ? 1 : 0
         ..dryRun = request.dryRun ? 1 : 0;
+      if (runV2 != null) {
+        optionsV2.ref.decoderPreference = text(request.decoderPreference);
+      }
 
-      final error = run(options, callback, Pointer<Void>.fromAddress(0), token);
+      final error = runV2 != null
+          ? runV2(optionsV2, callback, Pointer<Void>.fromAddress(0), token)
+          : run!(options, callback, Pointer<Void>.fromAddress(0), token);
       if (error.address == 0) {
         return null;
       }
@@ -443,7 +491,11 @@ class _CoreLibrary {
       for (final pointer in strings) {
         calloc.free(pointer);
       }
-      calloc.free(options);
+      if (runV2 != null) {
+        calloc.free(optionsV2);
+      } else {
+        calloc.free(options);
+      }
     }
   }
 

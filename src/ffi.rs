@@ -16,8 +16,9 @@ use std::path::PathBuf;
 use std::ptr;
 
 use super::{
-    CancellationToken, Event, EventSink, Preservation, QualityCheck, QualityMode, RunOptions,
-    TargetCodec, default_runtime_binary, event_json, list_reviews, normalize_encoder_choice,
+    CancellationToken, DecoderPreference, Event, EventSink, Preservation, QualityCheck,
+    QualityMode, RunOptions, TargetCodec, default_runtime_binary, event_json, list_reviews,
+    normalize_decoder_preference_choice, normalize_encoder_choice,
     normalize_encoder_preference_choice, normalize_output_format_choice,
     normalize_preservation_choice, normalize_quality_check_choice, normalize_quality_mode_choice,
     normalize_target_codec_choice, resolve_review, review_list_json, run_with_events,
@@ -25,8 +26,9 @@ use super::{
 };
 
 /// Newest ABI version this library exports.
-pub const MYVIDCOMP_FFI_ABI_VERSION: u32 = 1;
+pub const MYVIDCOMP_FFI_ABI_VERSION: u32 = 2;
 const RUN_OPTIONS_V1_ABI_VERSION: u32 = 1;
+const RUN_OPTIONS_V2_ABI_VERSION: u32 = 2;
 
 /// Run options for ABI version 1.
 ///
@@ -57,6 +59,18 @@ pub struct FfiRunOptionsV1 {
     pub quality_threads: u32,
     pub keep_original: u8,
     pub dry_run: u8,
+}
+
+/// Run options for ABI version 2.
+///
+/// Version 1 is embedded whole rather than repeated field by field, so the
+/// two layouts cannot drift apart, and `abi_version` inside it says 2 here.
+#[repr(C)]
+pub struct FfiRunOptionsV2 {
+    pub v1: FfiRunOptionsV1,
+    /// Whether the source may be decoded on a graphics card: auto, gpu, cpu,
+    /// or one of ffmpeg's method names.
+    pub decoder_preference: *const c_char,
 }
 
 #[repr(C)]
@@ -139,6 +153,28 @@ pub unsafe extern "C" fn myvidcomp_string_free(value: *mut c_char) {
 // AI-FUNC-SUMMARY: Reports the newest supported FFI ABI version; returns a constant; side effects: none.
 pub extern "C" fn myvidcomp_ffi_abi_version() -> u32 {
     MYVIDCOMP_FFI_ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`options` must be null or point to an allocation containing at least the `abi_version` and `struct_size` fields. ABI V2 requires `abi_version` 2; when `struct_size` covers `FfiRunOptionsV2`, the remaining fields must be valid. All non-null string pointers must point to valid NUL-terminated UTF-8 for the duration of the call. `token` must be null or a valid live cancellation token pointer. The callback must copy the JSON string before returning and must not unwind across the FFI boundary."]
+// AI-FUNC-SUMMARY:
+// Purpose: Runs a full conversion pass for callers that also choose how decoding happens.
+// Inputs: Pointer to version 2 run options, optional event callback and user data, and optional cancellation token pointer.
+// Returns: Null on success, or an allocated error string that must be freed with myvidcomp_string_free.
+// Side effects: Scans files, starts ffmpeg/ffprobe tools, writes temporary/output files, and invokes the callback synchronously during the run.
+// Notes: Version 1 is unchanged and keeps working; a caller using it decodes on a graphics card when one is proven to work on the file.
+pub unsafe extern "C" fn myvidcomp_run_blocking_v2(
+    options: *const FfiRunOptionsV2,
+    callback: Option<FfiEventCallback>,
+    user_data: *mut c_void,
+    token: *const CancellationToken,
+) -> *mut c_char {
+    let options = match unsafe { run_options_from_ffi_v2(options) } {
+        Ok(options) => options,
+        Err(err) => return ffi_string_ptr(err),
+    };
+
+    run_ffi_blocking(options, callback, user_data, token)
 }
 
 #[unsafe(no_mangle)]
@@ -242,7 +278,11 @@ unsafe fn run_options_from_ffi_v1(options: *const FfiRunOptionsV1) -> Result<Run
         ));
     }
 
-    let options = unsafe { &*options };
+    unsafe { run_options_from_ffi_v1_fields(&*options) }
+}
+
+// AI-FUNC-SUMMARY: Reads the version 1 fields, whichever struct they arrived in; returns options or a validation error; side effects: reads C strings through raw pointers.
+unsafe fn run_options_from_ffi_v1_fields(options: &FfiRunOptionsV1) -> Result<RunOptions, String> {
     let defaults = RunOptions::default();
 
     let quality_target = if options.quality_target == 0 {
@@ -315,7 +355,46 @@ unsafe fn run_options_from_ffi_v1(options: *const FfiRunOptionsV1) -> Result<Run
         quality_target,
         review_margin,
         quality_threads: options.quality_threads,
+        // Version 1 has no say in this, so it gets the default: a graphics
+        // card when one is proven to work on the file.
+        decoder_preference: DecoderPreference::default(),
     })
+}
+
+// AI-FUNC-SUMMARY: Converts version 2 FFI run options into safe Rust run options; returns options or a validation error; side effects: reads the versioned struct and C strings through raw pointers.
+unsafe fn run_options_from_ffi_v2(options: *const FfiRunOptionsV2) -> Result<RunOptions, String> {
+    if options.is_null() {
+        return Err("options pointer is required".to_string());
+    }
+
+    let header = unsafe { &*options.cast::<FfiOptionsHeader>() };
+    if header.abi_version != RUN_OPTIONS_V2_ABI_VERSION {
+        return Err(format!(
+            "unsupported FFI ABI version {}; myvidcomp_run_blocking_v2 requires version {RUN_OPTIONS_V2_ABI_VERSION}",
+            header.abi_version
+        ));
+    }
+
+    let expected_size = size_of::<FfiRunOptionsV2>() as u32;
+    if header.struct_size < expected_size {
+        return Err(format!(
+            "FFI options struct is too small: {} < {expected_size}",
+            header.struct_size
+        ));
+    }
+
+    let options = unsafe { &*options };
+    // Everything version 1 knows about is laid out identically, so the shared
+    // fields are read once through that view rather than copied out twice.
+    let mut base = unsafe { run_options_from_ffi_v1_fields(&options.v1) }?;
+    base.decoder_preference = unsafe {
+        ffi_choice(
+            options.decoder_preference,
+            "decoder_preference",
+            normalize_decoder_preference_choice,
+        )
+    }?;
+    Ok(base)
 }
 
 // AI-FUNC-SUMMARY: Reads one optional enum-valued C string and normalizes it; returns the parsed value or the type default; side effects: reads through a raw pointer when non-null.
@@ -492,6 +571,116 @@ mod tests {
     // AI-FUNC-SUMMARY: Verifies the exported ABI version constant matches the accessor; returns nothing; side effects: none.
     fn reports_abi_version() {
         assert_eq!(myvidcomp_ffi_abi_version(), MYVIDCOMP_FFI_ABI_VERSION);
-        assert_eq!(MYVIDCOMP_FFI_ABI_VERSION, 1);
+        assert_eq!(MYVIDCOMP_FFI_ABI_VERSION, 2);
+        // Version 1 keeps its own number, because a caller built against it
+        // still sends that in the header it fills in.
+        assert_eq!(RUN_OPTIONS_V1_ABI_VERSION, 1);
+        assert_eq!(RUN_OPTIONS_V2_ABI_VERSION, 2);
+    }
+}
+
+#[cfg(test)]
+mod v2_tests {
+    use super::*;
+    use crate::HwAccel;
+    use std::ffi::CString;
+
+    // AI-FUNC-SUMMARY: Builds a version 2 options struct for tests; returns the struct with only the folder set; side effects: none.
+    fn base_options_v2(folder: &CString) -> FfiRunOptionsV2 {
+        FfiRunOptionsV2 {
+            v1: FfiRunOptionsV1 {
+                abi_version: RUN_OPTIONS_V2_ABI_VERSION,
+                struct_size: size_of::<FfiRunOptionsV2>() as u32,
+                target_folder: folder.as_ptr(),
+                ffmpeg: ptr::null(),
+                ffprobe: ptr::null(),
+                tmp_dir: ptr::null(),
+                encoder: ptr::null(),
+                encoder_preference: ptr::null(),
+                output_format: ptr::null(),
+                target_codec: ptr::null(),
+                preservation: ptr::null(),
+                quality_mode: ptr::null(),
+                quality_check: ptr::null(),
+                count: -1,
+                quality_target: 0,
+                review_margin: 0,
+                quality_threads: 0,
+                keep_original: 1,
+                dry_run: 0,
+            },
+            decoder_preference: ptr::null(),
+        }
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies version 2 reads the decoding choice a caller sends; returns nothing; side effects: none.
+    fn reads_the_decoder_choice() {
+        let folder = CString::new("/videos").unwrap();
+        let decoder = CString::new("cuda").unwrap();
+        let mut options = base_options_v2(&folder);
+        options.decoder_preference = decoder.as_ptr();
+
+        let parsed = unsafe { run_options_from_ffi_v2(&options) }.unwrap();
+
+        assert_eq!(
+            parsed.decoder_preference,
+            DecoderPreference::Method(HwAccel::Cuda)
+        );
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies a caller built against version 1 keeps working and gets the default; returns nothing; side effects: none.
+    fn version_one_still_works() {
+        let folder = CString::new("/videos").unwrap();
+        let options = FfiRunOptionsV1 {
+            abi_version: RUN_OPTIONS_V1_ABI_VERSION,
+            struct_size: size_of::<FfiRunOptionsV1>() as u32,
+            target_folder: folder.as_ptr(),
+            ffmpeg: ptr::null(),
+            ffprobe: ptr::null(),
+            tmp_dir: ptr::null(),
+            encoder: ptr::null(),
+            encoder_preference: ptr::null(),
+            output_format: ptr::null(),
+            target_codec: ptr::null(),
+            preservation: ptr::null(),
+            quality_mode: ptr::null(),
+            quality_check: ptr::null(),
+            count: -1,
+            quality_target: 0,
+            review_margin: 0,
+            quality_threads: 0,
+            keep_original: 1,
+            dry_run: 0,
+        };
+
+        let parsed = unsafe { run_options_from_ffi_v1(&options) }.unwrap();
+
+        assert_eq!(parsed.decoder_preference, DecoderPreference::Auto);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies a version 1 header sent to the version 2 entry point is refused; returns nothing; side effects: none.
+    fn refuses_the_wrong_version() {
+        let folder = CString::new("/videos").unwrap();
+        let mut options = base_options_v2(&folder);
+        options.v1.abi_version = RUN_OPTIONS_V1_ABI_VERSION;
+
+        let error = unsafe { run_options_from_ffi_v2(&options) }.unwrap_err();
+
+        assert!(error.contains("unsupported FFI ABI version 1"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies a struct too small to hold the new field is refused; returns nothing; side effects: none.
+    fn refuses_a_truncated_struct() {
+        let folder = CString::new("/videos").unwrap();
+        let mut options = base_options_v2(&folder);
+        options.v1.struct_size = size_of::<FfiRunOptionsV1>() as u32;
+
+        let error = unsafe { run_options_from_ffi_v2(&options) }.unwrap_err();
+
+        assert!(error.contains("too small"));
     }
 }

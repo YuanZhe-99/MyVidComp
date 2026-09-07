@@ -116,3 +116,24 @@ changed in each one.
   keystore and its properties from the repository secrets, and the build reads them; without them
   the debug key is still used, which installs but can never be replaced by a signed package.
 - `2026-09-06`: Released as **MyVidComp 0.1.4**, the first signed Android package.
+- `2026-09-06`: Windows releases ship an installer beside the portable zip, built with Inno Setup
+  from one script per architecture, installing for the current user so nothing asks for an
+  administrator.
+- `2026-09-06`: Every phase of a file reports how far it has got. Choosing a quality setting,
+  measuring the result and validating it used to emit one line of text and then go silent, which is
+  why the interface animated a spinner for them. Phase weights are decided before a file starts, so
+  the bar cannot move backwards, and a retry maps into the range that is left rather than starting
+  over. The run as a whole gets its own bar, counting skipped files as done.
+- `2026-09-06`: What the interface shows is written in the language the reader chose. The engine
+  sends a code beside each skip reason, and sizes, scores and trials arrive as numbers rather than
+  as English sentences to be shown verbatim.
+- `2026-09-06`: Reversed the rule against hardware decoding, and added `--decoder` to control it.
+  The rule was written on 2026-09-05 after `-hwaccel auto` crashed FFmpeg on roughly one run in six;
+  what made that dangerous was FFmpeg choosing a different method per input. A method is now named,
+  proved by creating its device and decoding two frames of the real file, and any failure during
+  real work retries on the processor and stops the graphics card being used again for that run — so
+  a crash costs one encode, never a file. Measured here on Windows on Arm64: 90 decodes of 4K
+  10-bit H.265 with d3d11va, d3d12va and dxva2 without a single failure, and 90 AV1 decodes refused
+  cleanly by hardware that has no AV1 decoder, which is exactly what the per-codec check is for.
+- `2026-09-06`: Added FFI version 2 for the decoding setting. Version 1 is untouched and keeps
+  working.

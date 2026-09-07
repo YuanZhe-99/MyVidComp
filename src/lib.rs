@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod codec;
+mod decode;
 mod ffi;
 mod options;
 mod progress;
@@ -20,18 +21,19 @@ mod vmaf;
 
 // The codec tables are internal: they describe encoder families the pipeline
 // knows about, not a public contract.
-pub use ffi::{FfiEventCallback, FfiRunOptionsV1, MYVIDCOMP_FFI_ABI_VERSION};
+pub use ffi::{FfiEventCallback, FfiRunOptionsV1, FfiRunOptionsV2, MYVIDCOMP_FFI_ABI_VERSION};
 use progress::{FileProgress, MeasurePlan, Phase, PhaseWeights, RunProgress};
 pub use review::{ReviewDecision, ReviewItem, list_reviews, resolve_review, review_list_json};
 pub use vmaf::{VmafOptions, VmafScore};
 
 pub use options::{
-    DEFAULT_QUALITY_TARGET, DEFAULT_REVIEW_MARGIN, EncoderPreference, Preservation, QualityCheck,
-    QualityMode, TargetCodec, format_quality, normalize_encoder_preference_choice,
+    DEFAULT_QUALITY_TARGET, DEFAULT_REVIEW_MARGIN, DecoderPreference, EncoderPreference, HwAccel,
+    Preservation, QualityCheck, QualityMode, TargetCodec, format_quality,
+    normalize_decoder_preference_choice, normalize_encoder_preference_choice,
     normalize_preservation_choice, normalize_quality_check_choice, normalize_quality_mode_choice,
-    normalize_target_codec_choice, parse_encoder_preference, parse_preservation,
-    parse_quality_check, parse_quality_mode, parse_quality_points, parse_quality_target,
-    parse_target_codec, validate_quality_target,
+    normalize_target_codec_choice, parse_decoder_preference, parse_encoder_preference,
+    parse_preservation, parse_quality_check, parse_quality_mode, parse_quality_points,
+    parse_quality_target, parse_target_codec, validate_quality_target,
 };
 
 #[cfg(windows)]
@@ -119,6 +121,8 @@ pub struct RunOptions {
     pub tmp_dir: Option<PathBuf>,
     pub encoder: Option<String>,
     pub encoder_preference: EncoderPreference,
+    /// Whether the source may be decoded on a graphics card.
+    pub decoder_preference: DecoderPreference,
     pub output_format: OutputFormat,
     pub target_codec: TargetCodec,
     pub preservation: Preservation,
@@ -146,6 +150,7 @@ impl Default for RunOptions {
             tmp_dir: None,
             encoder: None,
             encoder_preference: EncoderPreference::Auto,
+            decoder_preference: DecoderPreference::Auto,
             output_format: OutputFormat::Mp4,
             target_codec: TargetCodec::Av1,
             preservation: Preservation::Flexible,
@@ -327,6 +332,12 @@ pub enum Event {
         phase: String,
         step: usize,
         steps: usize,
+    },
+    /// Which decoding method the run settled on.
+    DecoderSelected {
+        requested: String,
+        /// The ffmpeg method name, or null when decoding stays on the processor.
+        method: Option<String>,
     },
     /// How far the whole run has got. Separate from file progress because it
     /// also moves when a file is skipped and no ffmpeg is running.
@@ -605,6 +616,11 @@ fn event_json(event: &Event) -> String {
             json_string(phase),
             step,
             steps
+        ),
+        Event::DecoderSelected { requested, method } => format!(
+            "{{\"type\":\"decoder_selected\",\"requested\":{},\"method\":{}}}",
+            json_string(requested),
+            json_optional_string(method.as_deref())
         ),
         Event::RunProgress {
             processed,
@@ -1049,6 +1065,15 @@ fn run_workflow(
     );
     ui.set_candidate_count(candidates.len());
 
+    // Ask once whether the source can be decoded on a graphics card. Whether
+    // this particular file's codec can be is asked later, once, per codec.
+    let (mut decoding, decoding_complaint) =
+        decode::Decoding::choose(&options.ffmpeg, options.decoder_preference);
+    ui.emit_decoder_selected(options.decoder_preference, decoding.method());
+    if let Some(complaint) = decoding_complaint {
+        ui.log_warning(format!("Warning: {complaint}"));
+    }
+
     // Ask once whether this ffmpeg can measure quality. Without it the run
     // still works, it just cannot score results or judge a flexible conversion.
     let (support, reason) = vmaf::detect_vmaf_support(&options.ffmpeg);
@@ -1165,7 +1190,7 @@ fn run_workflow(
         }
 
         ui.start_file(summary.conversion_attempts() + 1, &item, preferred_encoder);
-        match transcode_item(&options, &item, &encoders, &mut ui) {
+        match transcode_item(&options, &item, &encoders, &mut decoding, &mut ui) {
             Ok(result) => {
                 summary.converted += 1;
                 summary.source_bytes += result.source_bytes;
@@ -1244,6 +1269,7 @@ struct Cli {
     tmp_dir: Option<PathBuf>,
     encoder: Option<String>,
     encoder_preference: EncoderPreference,
+    decoder_preference: DecoderPreference,
     output_format: OutputFormat,
     target_codec: TargetCodec,
     preservation: Preservation,
@@ -1283,6 +1309,7 @@ impl Cli {
         let mut tmp_dir = None;
         let mut encoder_override = None;
         let mut encoder_preference_override = None;
+        let mut decoder_preference_override = None;
         let mut output_format_override = None;
         let mut target_codec_override = None;
         let mut preservation_override = None;
@@ -1355,6 +1382,12 @@ impl Cli {
                         .next()
                         .ok_or_else(|| format!("{arg} requires a value"))?;
                     encoder_preference_override = Some(normalize_encoder_preference_choice(&raw)?);
+                }
+                "--decoder" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--decoder requires a value".to_string())?;
+                    decoder_preference_override = Some(normalize_decoder_preference_choice(&raw)?);
                 }
                 "--output-format" => {
                     let raw = iter
@@ -1438,6 +1471,7 @@ impl Cli {
                 tmp_dir,
                 encoder: encoder_override.flatten(),
                 encoder_preference: encoder_preference_override.flatten().unwrap_or_default(),
+                decoder_preference: decoder_preference_override.flatten().unwrap_or_default(),
                 output_format: output_format_override.flatten().unwrap_or_default(),
                 target_codec: target_codec_override.flatten().unwrap_or_default(),
                 preservation: preservation_override.flatten().unwrap_or_default(),
@@ -1488,6 +1522,9 @@ impl Cli {
             encoder_preference: encoder_preference_override
                 .unwrap_or(config.encoder_preference)
                 .unwrap_or_default(),
+            decoder_preference: decoder_preference_override
+                .unwrap_or(config.decoder_preference)
+                .unwrap_or_default(),
             output_format: output_format_override
                 .unwrap_or(config.output_format)
                 .unwrap_or_default(),
@@ -1531,6 +1568,7 @@ impl From<Cli> for RunOptions {
             tmp_dir: cli.tmp_dir,
             encoder: cli.encoder,
             encoder_preference: cli.encoder_preference,
+            decoder_preference: cli.decoder_preference,
             output_format: cli.output_format,
             target_codec: cli.target_codec,
             preservation: cli.preservation,
@@ -1582,6 +1620,12 @@ Which encoder
                               the source exactly. gpu prefers speed. cpu makes
                               the smallest files. Default: auto.
   --encoder NAME              Use one specific encoder and no other.
+  --decoder auto|gpu|cpu|NAME Whether to read the source with a graphics card.
+                              auto uses one when it is proven to work on the
+                              file and falls back to the processor on any
+                              failure. cpu keeps scores reproducible on any
+                              machine. A name such as d3d11va or cuda picks one
+                              method. Default: auto.
 
 Files
   --count N                   Convert at most N files. -1 means all.
@@ -1667,6 +1711,7 @@ struct Config {
     tmp_dir: Option<PathBuf>,
     encoder: Option<String>,
     encoder_preference: Option<EncoderPreference>,
+    decoder_preference: Option<DecoderPreference>,
     output_format: Option<OutputFormat>,
     target_codec: Option<TargetCodec>,
     preservation: Option<Preservation>,
@@ -1727,6 +1772,13 @@ fn parse_config_yaml(text: &str) -> Result<Config, String> {
         if key == "encoder_preference" || key == "conversion_mode" {
             let value = optional_yaml_value(raw_value, line_number)?;
             config.encoder_preference = normalize_encoder_preference_choice(&value)
+                .map_err(|err| format!("line {line_number}: {err}"))?;
+            continue;
+        }
+
+        if key == "decoder_preference" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            config.decoder_preference = normalize_decoder_preference_choice(&value)
                 .map_err(|err| format!("line {line_number}: {err}"))?;
             continue;
         }
@@ -3521,6 +3573,7 @@ fn transcode_item(
     options: &RunOptions,
     item: &WorkItem,
     selection: &EncoderSelection,
+    decoding: &mut decode::Decoding,
     ui: &mut ProgressUi,
 ) -> Result<ConversionResult, String> {
     let metadata_filter = metadata_bsf_arg(
@@ -3539,7 +3592,7 @@ fn transcode_item(
         cached_item.temp_path = cache_path;
         // A reused temp still has to earn its place, so it is measured and can
         // still end up in review rather than replacing the original outright.
-        let outcome = assess_quality(options, &cached_item, &[], ui);
+        let outcome = assess_quality(options, &cached_item, &[], decoding, ui);
         return finish_conversion(options, &cached_item, outcome, ui);
     }
 
@@ -3574,10 +3627,17 @@ fn transcode_item(
             total_attempts,
             fallback_reason.as_deref(),
         );
-        match execute_transcode_attempt(options, item, plan, metadata_filter.as_deref(), ui) {
+        match execute_transcode_attempt(
+            options,
+            item,
+            plan,
+            metadata_filter.as_deref(),
+            decoding,
+            ui,
+        ) {
             Ok(()) => {
                 let deviations = plan_deviations(options, plan, item);
-                let outcome = assess_quality(options, item, &deviations, ui);
+                let outcome = assess_quality(options, item, &deviations, decoding, ui);
                 return finish_conversion(options, item, outcome, ui);
             }
             Err(err) => {
@@ -3770,6 +3830,7 @@ fn assess_quality(
     options: &RunOptions,
     item: &WorkItem,
     deviations: &[(String, String)],
+    decoding: &mut decode::Decoding,
     ui: &mut ProgressUi,
 ) -> ConversionOutcome {
     let mut deviations = deviations.to_vec();
@@ -3799,7 +3860,7 @@ fn assess_quality(
         subsample: options.quality_check.subsample(),
         threads: options.quality_threads,
     };
-    let measured = measure_quality_with_progress(options, item, vmaf_options, ui);
+    let measured = measure_quality_with_progress(options, item, vmaf_options, decoding, ui);
     ui.finish_phase(Phase::Measuring);
 
     match measured {
@@ -3850,22 +3911,51 @@ fn measure_quality_with_progress(
     options: &RunOptions,
     item: &WorkItem,
     vmaf_options: VmafOptions,
+    decoding: &mut decode::Decoding,
     ui: &mut ProgressUi,
 ) -> Result<VmafScore, String> {
-    let args = vmaf::build_vmaf_args(
-        &item.temp_path,
-        &item.input_path,
-        &item.video,
-        vmaf_options,
-        true,
-    );
-    let run = run_ffmpeg_streaming(
+    // Both files are read here, and the comparison itself always runs on the
+    // processor, so decoding on the card is what leaves it free to do that.
+    // The two files are in different codecs, and hardware that decodes the
+    // source will not necessarily decode what was made from it, so each one is
+    // asked about separately.
+    let source = decoding.method_for(&options.ffmpeg, &item.input_path, &item.video.codec_name);
+    let converted = decoding.method_for(
         &options.ffmpeg,
-        &args,
-        StreamedRun::single(Phase::Measuring, item.video.duration_seconds),
-        ui,
-    )?;
-    vmaf::score_from_output(run.status.success(), &run.stderr, vmaf_options.subsample)
+        &item.temp_path,
+        options.target_codec.ffprobe_name(),
+    );
+    let measure = |methods: (Option<HwAccel>, Option<HwAccel>), ui: &mut ProgressUi| {
+        let args = vmaf::build_vmaf_args(
+            &item.temp_path,
+            &item.input_path,
+            &item.video,
+            vmaf_options,
+            true,
+            methods,
+        );
+        run_ffmpeg_streaming(
+            &options.ffmpeg,
+            &args,
+            StreamedRun::single(Phase::Measuring, item.video.duration_seconds),
+            ui,
+        )
+        .and_then(|run| {
+            vmaf::score_from_output(run.status.success(), &run.stderr, vmaf_options.subsample)
+        })
+    };
+
+    match measure((converted, source), ui) {
+        Ok(score) => Ok(score),
+        Err(err) if converted.is_some() || source.is_some() => {
+            ui.log_warning(format!(
+                "Warning: measuring on the graphics card failed, so the rest of this run decodes on the processor: {err}"
+            ));
+            decoding.disable();
+            measure((None, None), ui)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 // AI-FUNC-SUMMARY: Commits a finished conversion, either replacing the original or keeping both for review; returns the conversion sizes or a terminal error; side effects: moves files and may write a review record.
@@ -3935,18 +4025,42 @@ fn execute_transcode_attempt(
     item: &WorkItem,
     plan: &TranscodePlan<'_>,
     metadata_filter: Option<&str>,
+    decoding: &mut decode::Decoding,
     ui: &mut ProgressUi,
 ) -> Result<(), TranscodeAttemptError> {
     remove_failed_attempt_output(&item.temp_path)?;
 
-    let args = build_ffmpeg_args_for_plan(item, plan, options.target_codec);
-    let run = run_ffmpeg_streaming(
+    let method = decoding.method_for(&options.ffmpeg, &item.input_path, &item.video.codec_name);
+    let args = build_ffmpeg_args_for_plan(item, plan, options.target_codec, method);
+    let mut run = run_ffmpeg_streaming(
         &options.ffmpeg,
         &args,
         StreamedRun::single(Phase::Encoding, item.video.duration_seconds),
         ui,
     )
     .map_err(TranscodeAttemptError::terminal)?;
+
+    // A graphics card that fails here costs one encode, not the file: the
+    // temp output is discarded, this attempt is run again on the processor,
+    // and nothing else in the run tries the card. That is what makes hardware
+    // decoding safe to have on by default.
+    if !run.status.success() && method.is_some() {
+        ui.log_warning(format!(
+            "Warning: decoding on the graphics card failed, so the rest of this run decodes on the processor: {}",
+            first_error_line(&run.stderr)
+        ));
+        decoding.disable();
+        remove_failed_attempt_output(&item.temp_path)?;
+        let args = build_ffmpeg_args_for_plan(item, plan, options.target_codec, None);
+        run = run_ffmpeg_streaming(
+            &options.ffmpeg,
+            &args,
+            StreamedRun::single(Phase::Encoding, item.video.duration_seconds),
+            ui,
+        )
+        .map_err(TranscodeAttemptError::terminal)?;
+    }
+
     if !run.status.success() {
         let message = if run.stderr.trim().is_empty() {
             format!("ffmpeg exited with status {}", run.status)
@@ -4293,7 +4407,7 @@ fn build_ffmpeg_args(item: &WorkItem, encoder: &Encoder) -> Vec<String> {
         quality: default_encoder_quality(item, encoder, TargetCodec::Av1),
         exempt: MetadataExemptions::default(),
     };
-    build_ffmpeg_args_for_plan(item, &plan, TargetCodec::Av1)
+    build_ffmpeg_args_for_plan(item, &plan, TargetCodec::Av1, None)
 }
 
 // AI-FUNC-SUMMARY: Builds ffmpeg arguments for one encode attempt; returns command arguments; side effects: none.
@@ -4301,22 +4415,29 @@ fn build_ffmpeg_args_for_plan(
     item: &WorkItem,
     plan: &TranscodePlan<'_>,
     codec: TargetCodec,
+    decoding: Option<HwAccel>,
 ) -> Vec<String> {
     let encoder = plan.encoder;
     let plan_kind = plan.kind;
-    // Decoding is deliberately left to the processor. Asking ffmpeg for
-    // automatic hardware decoding crashed it outright on roughly one run in six
-    // during testing, losing the whole file's work, and the encode dominates the
-    // time anyway. Hardware acceleration for the encode side is unaffected.
+    // A named method, never `auto`. Automatic hardware decoding was removed
+    // once because it crashed ffmpeg outright on roughly one run in six, and
+    // what made that dangerous was ffmpeg choosing a different path per input.
+    // What arrives here has already created its device and decoded two frames
+    // of this file's codec, and a failure retries on the processor.
     let mut args = vec![
         "-hide_banner".to_string(),
         "-nostdin".to_string(),
         "-y".to_string(),
         "-stats_period".to_string(),
         "1".to_string(),
+    ];
+    if let Some(method) = decoding {
+        args.extend(["-hwaccel".to_string(), method.as_str().to_string()]);
+    }
+    args.extend([
         "-i".to_string(),
         item.input_path.to_string_lossy().into_owned(),
-    ];
+    ]);
 
     args.extend(stream_map_args(&item.mapped_stream_indexes));
     args.extend([
@@ -5939,6 +6060,21 @@ impl<'a> ProgressUi<'a> {
     // AI-FUNC-SUMMARY: Records whether quality can be measured in this run; returns none; side effects: updates progress state.
     fn set_quality_available(&mut self, available: bool) {
         self.quality_available = available;
+    }
+
+    // AI-FUNC-SUMMARY: Reports which decoding method the run will use; returns none; side effects: emits an event and prints a terminal line.
+    fn emit_decoder_selected(&mut self, requested: DecoderPreference, method: Option<HwAccel>) {
+        let method = method.map(|method| method.as_str().to_string());
+        self.events.on_event(Event::DecoderSelected {
+            requested: requested.as_str().to_string(),
+            method: method.clone(),
+        });
+        if self.terminal {
+            eprintln!(
+                "Decoding: {}",
+                method.unwrap_or_else(|| "the processor".to_string())
+            );
+        }
     }
 
     // AI-FUNC-SUMMARY: Records how many candidates the run will work through; returns none; side effects: updates progress state.

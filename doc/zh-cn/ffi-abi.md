@@ -7,10 +7,14 @@
 
 | 版本 | 结构体 | 入口点 |
 |---|---|---|
-| 1（当前） | `FfiRunOptionsV1`（按指针） | `myvidcomp_run_blocking_v1` |
+| 1 | `FfiRunOptionsV1`（按指针） | `myvidcomp_run_blocking_v1` |
+| 2（当前） | `FfiRunOptionsV2`（按指针） | `myvidcomp_run_blocking_v2` |
 
 版本 1 是本名称下的第一个版本。上一个项目导出过三个结构体版本；它们已经不复存在，那个永远无法安全
 扩展的按值结构体也一并移除。
+
+版本 2 增加了 `decoder_preference`，并且整体嵌入版本 1 而不是重复它的字段，这样两种布局不会走样。
+仍然使用版本 1 的调用方照常工作，并取得默认值：在确认显卡可用于该文件时使用显卡。
 
 规则：
 
@@ -37,6 +41,7 @@
 |---|---|
 | `myvidcomp_ffi_abi_version` | 报告支持的最新版本 |
 | `myvidcomp_run_blocking_v1` | 运行一次转换并报告事件 |
+| `myvidcomp_run_blocking_v2` | 同上，供同时选择解码方式的调用方使用 |
 | `myvidcomp_cancellation_token_new` | 分配一个取消令牌 |
 | `myvidcomp_cancellation_token_request_stop` | 请求优雅停止 |
 | `myvidcomp_cancellation_token_free` | 释放取消令牌 |
@@ -60,8 +65,11 @@
 | `scan_started`、`scan_finished` | 文件夹扫描开始和结束 |
 | `dry_run` | 预览运行列出它会做什么 |
 | `encoder_candidate_evaluated`、`encoder_selected` | 编码器检测期间 |
+| `decoder_selected` | 一次，说明本次运行采用的解码方式 |
 | `file_skipped` | 某个文件保持原样，并附上原因 |
 | `file_started`、`file_attempt`、`file_progress` | 某个文件转换期间 |
+| `phase` | 文件的某个阶段开始，并给出它在该阶段最坏情况中的第几步 |
+| `run_progress` | 整个运行的进度，跳过的文件也计入 |
 | `quality_search` | 调整搜索的一次试编码 |
 | `quality_measured` | 完成的转换已与源做过比较 |
 | `copy_progress`、`stage` | 耗时较长的非编码步骤期间 |

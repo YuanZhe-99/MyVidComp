@@ -128,6 +128,10 @@ void main() {
         for (final value in encoderPreferenceChoices) {
           expect(text.encoderPreferenceLabel(value), isNot(equals(value)));
         }
+        for (final value in decoderPreferenceChoices) {
+          expect(text.decoderPreferenceLabel(value), isNot(equals(value)));
+          expect(text.decoderPreferenceHelp(value), isNotEmpty);
+        }
         for (final value in containerChoices) {
           expect(text.containerLabel(value), isNot(equals(value)));
         }
@@ -164,6 +168,7 @@ void main() {
         tmpDir: '/tmp',
         encoder: 'auto',
         encoderPreference: 'gpu',
+        decoderPreference: 'cpu',
         container: 'mkv-fallback',
         codec: 'hevc',
         preservation: 'strict',

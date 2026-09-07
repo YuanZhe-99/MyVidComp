@@ -66,9 +66,16 @@ distinct from its wire value in every language.
 
 ## Progress
 
-Progress bars are determinate whenever there is a percentage to show, and indeterminate only while
-something genuinely has no measurable progress, such as scanning or measuring. They are never left
-in an unknown state while idle.
+Two bars: the file being worked on, and the whole run. Both are determinate. Every phase a file
+passes through reports where it has got to, including choosing a quality setting and measuring the
+result, so only the folder scan is ever left indeterminate. Neither bar moves backwards, and they
+are never left in an unknown state while idle.
+
+The run bar counts every file the run is finished with, skipped ones included, so a second pass over
+a folder that is already converted still reaches the end.
+
+Beside the file bar are the phase, the speed FFmpeg reports and the time left, and each line of the
+details log carries how serious it is.
 
 ## Identity
 

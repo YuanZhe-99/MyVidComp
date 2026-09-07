@@ -375,7 +375,10 @@ pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result
             subsample: 1,
             threads: 0,
         };
-        let args = vmaf::build_vmaf_args(&encoded, sample, video, options, true);
+        // Trials stay on the processor: a sample is twenty seconds, and creating
+        // a decoding device costs more than software decoding that much video,
+        // up to thirty-six times per file.
+        let args = vmaf::build_vmaf_args(&encoded, sample, video, options, true, (None, None));
         let measurement = run(
             &args,
             StreamedRun {

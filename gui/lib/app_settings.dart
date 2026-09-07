@@ -8,6 +8,10 @@ const List<String> preservationChoices = ['flexible', 'strict'];
 const List<String> qualityModeChoices = ['search', 'estimate'];
 const List<String> qualityCheckChoices = ['sampled', 'full', 'off'];
 const List<String> encoderPreferenceChoices = ['auto', 'gpu', 'cpu'];
+
+/// How the source is read. A method name may also be stored, so the interface
+/// offers these three and keeps anything else the config file already had.
+const List<String> decoderPreferenceChoices = ['auto', 'gpu', 'cpu'];
 const List<String> containerChoices = ['mp4', 'mkv-fallback'];
 
 /// Quality presets, as VMAF scores in hundredths.
@@ -23,6 +27,7 @@ class AppSettings {
     required this.tmpDir,
     required this.encoder,
     required this.encoderPreference,
+    required this.decoderPreference,
     required this.container,
     required this.codec,
     required this.preservation,
@@ -48,6 +53,9 @@ class AppSettings {
   final String tmpDir;
   final String encoder;
   final String encoderPreference;
+
+  /// Whether the source may be decoded on a graphics card.
+  final String decoderPreference;
   final String container;
   final String codec;
   final String preservation;
@@ -75,6 +83,7 @@ class AppSettings {
     tmpDir: '',
     encoder: 'auto',
     encoderPreference: 'auto',
+    decoderPreference: 'auto',
     container: 'mp4',
     codec: 'av1',
     preservation: 'flexible',
@@ -97,6 +106,7 @@ class AppSettings {
     String? tmpDir,
     String? encoder,
     String? encoderPreference,
+    String? decoderPreference,
     String? container,
     String? codec,
     String? preservation,
@@ -116,6 +126,7 @@ class AppSettings {
     tmpDir: tmpDir ?? this.tmpDir,
     encoder: encoder ?? this.encoder,
     encoderPreference: encoderPreference ?? this.encoderPreference,
+    decoderPreference: decoderPreference ?? this.decoderPreference,
     container: container ?? this.container,
     codec: codec ?? this.codec,
     preservation: preservation ?? this.preservation,
@@ -175,6 +186,11 @@ class AppSettings {
         encoderPreferenceChoices,
         // The setting used to be called the conversion mode.
         _migrateConversionMode(json['conversionMode']),
+      ),
+      decoderPreference: pick(
+        'decoderPreference',
+        decoderPreferenceChoices,
+        defaults.decoderPreference,
       ),
       container: pick(
         'container',
@@ -237,6 +253,7 @@ class AppSettings {
     'tmpDir': tmpDir,
     'encoder': encoder,
     'encoderPreference': encoderPreference,
+    'decoderPreference': decoderPreference,
     'container': container,
     'codec': codec,
     'preservation': preservation,

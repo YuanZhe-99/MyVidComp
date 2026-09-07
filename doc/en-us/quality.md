@@ -28,7 +28,10 @@ Three things are done to every comparison:
 - Both inputs get their timebase and start time reset. A source that does not
   begin at zero otherwise scores far too low, because the filter compares
   mismatched frames.
-- Hardware decoding is not used. The filter needs frames in ordinary memory.
+- Decoding may happen on a graphics card, but the comparison itself never does.
+  The two files are decoded separately, because they are in different codecs and
+  hardware that reads one may refuse the other, and the decoded frames are
+  brought back into ordinary memory for the filter.
 
 The model is chosen by resolution: the 4K model above 1440p, the standard model
 below it.
@@ -95,3 +98,31 @@ Measurement is not free. Comparing every frame of a 1080p file takes about as
 long as encoding it; 4K is several times worse. The spot check compares one
 frame in five, which is several times faster and accurate enough to decide with.
 A tuning search adds a handful of short encodes on top of that.
+
+## Reading the video
+
+Decoding happens twice for every file: once to convert it, and once more to
+compare the result against it. The `--decoder` setting decides where that
+happens.
+
+`auto`, the default, uses a graphics card when one is proven to work. Proving it
+takes two steps, because neither answers the other's question: creating the
+device says whether the driver is there, and decoding two frames of the real
+file says whether this codec is supported at all. Hardware with no AV1 decoder
+handles H.265 perfectly and refuses AV1, and the answer is remembered per codec,
+so a folder of one codec is asked once.
+
+Any failure during real work is treated the same way: one warning, the work is
+repeated on the processor, and nothing else in the run uses the card again. A
+crash therefore costs one encode rather than the file. This is why `auto` is
+safe to have on; an earlier version asked FFmpeg to choose a method by itself,
+which crashed it on roughly one run in six.
+
+`cpu` never uses a graphics card. It is the setting to choose when a score has
+to come out the same on another machine. `gpu` asks for one and says so when
+none can be used. A method name such as `d3d11va`, `cuda`, `vaapi` or
+`videotoolbox` picks exactly one and nothing else.
+
+What this speeds up is reading the video, not the measurement: VMAF itself runs
+on the processor in every case. On a 4K file that still helps, because it leaves
+the processor free for the comparison.
