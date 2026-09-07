@@ -143,3 +143,8 @@ changed in each one.
   the `libvmaf_cuda` filter and `--decoder cuda` was asked for by name. No distributed build has
   that filter: it needs FFmpeg configured `--enable-nonfree`, which cannot be redistributed, so the
   bundled build offers decoding on the card but not scoring on it.
+- `2026-09-06`: Gave the Android package its own launcher icon. It had been carrying Flutter's
+  default one, because the icon settings named Windows and macOS but never Android. The icon is
+  also supplied in the shape-independent form Android has wanted since version 8: the artwork inset
+  on a white ground, so a launcher that draws icons as circles crops the background rather than the
+  picture.

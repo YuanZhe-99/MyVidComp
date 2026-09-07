@@ -28,6 +28,13 @@ flutter:
 
 flutter_launcher_icons:
   image_path: "assets/icon/app_icon.png"
+  # Android draws a launcher icon inside a shape of the launcher's choosing and
+  # keeps only the middle of it, so the artwork is inset rather than passed
+  # straight through, and the transparency behind it is filled in.
+  android: "ic_launcher"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  adaptive_icon_foreground_inset: 18
   windows:
     generate: true
     image_path: "assets/icon/app_icon.png"
