@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../app_localizations.dart';
+import '../formatting.dart';
 import '../widgets.dart';
 
 /// The screen that shows what is happening right now and what already happened.
@@ -15,7 +16,7 @@ class ProgressPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = AppText.of(context);
 
-    if (!controller.isRunning && controller.records.isEmpty) {
+    if (!controller.isActive && controller.records.isEmpty) {
       return EmptyState(
         icon: Icons.timelapse_outlined,
         title: text.noActivityYet,
@@ -58,13 +59,12 @@ class _StatusCard extends StatelessWidget {
       RunStage.failed => text.statusFailed,
     };
 
-    // Measuring and tuning have no percentage of their own, so the bar shows
-    // that work is happening rather than pretending to know how much is left.
+    // Every phase of a file now reports where it has got to. Only the scan, and
+    // the moment before the first file starts, have nothing to count.
     final indeterminate =
-        controller.isRunning &&
-        (controller.stage == RunStage.measuring ||
-            controller.stage == RunStage.tuning ||
-            controller.stage == RunStage.scanning);
+        controller.isActive &&
+        (controller.stage == RunStage.scanning ||
+            controller.stage == RunStage.starting);
 
     return SectionCard(
       title: label,
@@ -95,6 +95,25 @@ class _StatusCard extends StatelessWidget {
           minHeight: 8,
           borderRadius: BorderRadius.circular(999),
         ),
+        if (controller.isActive) ...[
+          const SizedBox(height: 6),
+          _ProgressDetail(controller: controller),
+          const SizedBox(height: 14),
+          Text(text.overallProgress, style: theme.textTheme.labelMedium),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: (controller.overallProgress / 100).clamp(0.0, 1.0),
+            minHeight: 4,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          if (controller.overallRemaining != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              text.timeLeft(formatDuration(controller.overallRemaining!)),
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ],
         if (controller.lastError != null) ...[
           const SizedBox(height: 14),
           Text(
@@ -236,7 +255,6 @@ class _DetailsLog extends StatelessWidget {
   // AI-FUNC-SUMMARY: Builds the collapsible technical log; returns the widget; side effects: none.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
-    final theme = Theme.of(context);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -252,11 +270,92 @@ class _DetailsLog extends StatelessWidget {
               itemCount: controller.log.length.clamp(0, 200),
               separatorBuilder: (_, _) => const Divider(height: 12),
               itemBuilder: (context, index) =>
-                  Text(controller.log[index], style: theme.textTheme.bodySmall),
+                  _LogLine(entry: controller.log[index]),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The numbers beside the current file's bar: which phase, how fast, how long.
+class _ProgressDetail extends StatelessWidget {
+  const _ProgressDetail({required this.controller});
+
+  final AppController controller;
+
+  @override
+  // AI-FUNC-SUMMARY: Builds the line of live figures under the file's bar; returns the widget; side effects: none.
+  Widget build(BuildContext context) {
+    final text = AppText.of(context);
+    final theme = Theme.of(context);
+
+    final parts = <String>[
+      formatPercent(controller.fileProgress),
+      if (controller.stage == RunStage.tuning && controller.trials > 0)
+        text.trialOfTotal(controller.trial, controller.trials),
+      if (controller.speed != null && controller.speed != 'N/A')
+        formatSpeed(controller.speed!),
+      if (controller.fileRemaining != null)
+        text.timeLeft(formatDuration(controller.fileRemaining!)),
+    ];
+
+    return Text(
+      parts.join('  ·  '),
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
+
+/// One line of the details log, written in the reader's own language.
+class _LogLine extends StatelessWidget {
+  const _LogLine({required this.entry});
+
+  final LogEntry entry;
+
+  @override
+  // AI-FUNC-SUMMARY: Builds one details line with an icon for how serious it is; returns the widget; side effects: none.
+  Widget build(BuildContext context) {
+    final text = AppText.of(context);
+    final theme = Theme.of(context);
+
+    final message = switch (entry.kind) {
+      LogKind.trial =>
+        entry.setting == null
+            ? text.tryingSetting(formatScore(entry.score ?? 0))
+            : '${text.tryingSetting(formatScore(entry.score ?? 0))} '
+                  '(${entry.setting})',
+      LogKind.message => entry.message,
+    };
+
+    final (icon, colour) = switch (entry.level) {
+      LogLevel.error => (Icons.error_outline, theme.colorScheme.error),
+      LogLevel.warning => (
+        Icons.warning_amber_outlined,
+        theme.colorScheme.tertiary,
+      ),
+      LogLevel.info => (Icons.info_outline, theme.colorScheme.onSurfaceVariant),
+    };
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2, right: 8),
+          child: Icon(icon, size: 14, color: colour),
+        ),
+        Expanded(
+          child: Text(
+            message,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: entry.level == LogLevel.error ? colour : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

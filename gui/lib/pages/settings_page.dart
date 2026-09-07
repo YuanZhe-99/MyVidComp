@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../app_localizations.dart';
+import '../formatting.dart';
 import '../app_settings.dart';
 import '../widgets.dart';
 
@@ -228,13 +229,13 @@ class _ReviewMargin extends StatelessWidget {
         children: [
           Text(text.reviewMarginLabel, style: theme.textTheme.labelLarge),
           const SizedBox(height: 4),
-          Text(formatQuality(threshold), style: theme.textTheme.headlineSmall),
+          Text(formatScore(threshold), style: theme.textTheme.headlineSmall),
           Slider(
             value: settings.reviewMargin.toDouble(),
             min: 0,
             max: 1000,
             divisions: 20,
-            label: formatQuality(threshold),
+            label: formatScore(threshold),
             onChanged: enabled ? (value) => onChanged(value.round()) : null,
           ),
           Text(

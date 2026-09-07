@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import 'formatting.dart';
+
 /// Sentinel meaning "use whatever language the device is set to".
 const String systemLanguageCode = 'system';
 
@@ -238,7 +240,7 @@ class AppText {
     9500 => _text('qualityHigh'),
     9300 => _text('qualityBalanced'),
     9000 => _text('qualitySmallest'),
-    _ => formatQuality(hundredths),
+    _ => formatScore(hundredths),
   };
 
   // AI-FUNC-SUMMARY: Explains one quality preset; returns the sentence; side effects: none.
@@ -308,7 +310,7 @@ class AppText {
 
   // AI-FUNC-SUMMARY: Reports a measured quality score; returns the sentence; side effects: none.
   String qualityScore(int hundredths) =>
-      _format('qualityScore', {'score': formatQuality(hundredths)});
+      _format('qualityScore', {'score': formatScore(hundredths)});
 
   // AI-FUNC-SUMMARY: Reports how a converted file compares in size; returns the sentence; side effects: none.
   String sizeComparison(String before, String after, String change) => _format(
@@ -336,6 +338,13 @@ class AppText {
   String tryingSetting(String score) =>
       _format('tryingSetting', {'score': score});
 
+  // AI-FUNC-SUMMARY: Reports how much longer something has to run; returns the phrase; side effects: none.
+  String timeLeft(String duration) => _format('timeLeft', {'time': duration});
+
+  // AI-FUNC-SUMMARY: Reports which trial of a quality search is running; returns the phrase; side effects: none.
+  String trialOfTotal(int trial, int total) =>
+      _format('trialOfTotal', {'trial': '$trial', 'total': '$total'});
+
   // AI-FUNC-SUMMARY: Reports a capability this installation lacks; returns the sentence; side effects: none.
   String featureUnavailable(String detail) =>
       _format('featureUnavailable', {'detail': detail});
@@ -346,7 +355,6 @@ class AppText {
 }
 
 // AI-FUNC-SUMMARY: Formats a hundredths quality value for display; returns a one-decimal string; side effects: none.
-String formatQuality(int hundredths) => (hundredths / 100).toStringAsFixed(1);
 
 // AI-FUNC-SUMMARY: Turns a stored language value into one the app supports; returns the language code; side effects: none.
 String normalizeLanguageCode(String value) {
@@ -438,7 +446,9 @@ const Map<String, Map<String, String>> _strings = {
     'statusFailed': 'Something went wrong',
     'nothingToDo': 'No videos here need converting.',
     'currentFile': 'Working on',
-    'overallProgress': 'This file',
+    'overallProgress': 'All files',
+    'timeLeft': '{time} left',
+    'trialOfTotal': 'trial {trial} of at most {total}',
     'converted': 'Converted',
     'skipped': 'Left alone',
     'failed': 'Could not convert',
@@ -598,7 +608,9 @@ const Map<String, Map<String, String>> _strings = {
     'statusFailed': '出了点问题',
     'nothingToDo': '这里没有需要转换的视频。',
     'currentFile': '正在处理',
-    'overallProgress': '当前文件',
+    'overallProgress': '全部文件',
+    'timeLeft': '剩余 {time}',
+    'trialOfTotal': '第 {trial} 次试编码，最多 {total} 次',
     'converted': '已转换',
     'skipped': '保持原样',
     'failed': '无法转换',
@@ -740,7 +752,9 @@ const Map<String, Map<String, String>> _strings = {
     'statusFailed': '出了點問題',
     'nothingToDo': '這裡沒有需要轉換的影片。',
     'currentFile': '正在處理',
-    'overallProgress': '目前檔案',
+    'overallProgress': '全部檔案',
+    'timeLeft': '剩餘 {time}',
+    'trialOfTotal': '第 {trial} 次試編碼，最多 {total} 次',
     'converted': '已轉換',
     'skipped': '保持原樣',
     'failed': '無法轉換',
@@ -882,7 +896,9 @@ const Map<String, Map<String, String>> _strings = {
     'statusFailed': '問題が発生しました',
     'nothingToDo': 'ここに変換が必要な動画はありません。',
     'currentFile': '処理中',
-    'overallProgress': 'このファイル',
+    'overallProgress': 'すべてのファイル',
+    'timeLeft': '残り {time}',
+    'trialOfTotal': '試験変換 {trial} 回目（最大 {total} 回）',
     'converted': '変換済み',
     'skipped': 'そのまま',
     'failed': '変換できません',

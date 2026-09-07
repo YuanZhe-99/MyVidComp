@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../app_localizations.dart';
+import '../formatting.dart';
 import '../core_ffi.dart';
 import '../widgets.dart';
 

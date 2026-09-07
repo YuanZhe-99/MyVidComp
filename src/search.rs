@@ -8,11 +8,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use super::{
-    EncoderKind, EncoderQuality, TargetCodec, VideoInfo, VmafOptions, codec, first_error_line,
-    process_command, vmaf,
+    EncoderKind, EncoderQuality, Phase, StreamedRun, StreamedRunner, TargetCodec, VideoInfo,
+    VmafOptions, codec, first_error_line, vmaf,
 };
 
 /// How samples are taken from a source.
@@ -26,6 +25,16 @@ pub(crate) struct SamplePlan {
 
 /// The most trial encodes one search will run.
 pub(crate) const MAX_ITERATIONS: usize = 6;
+
+// AI-FUNC-SUMMARY:
+// Purpose: Counts the ffmpeg runs a search may need, as the denominator its progress is measured against.
+// Inputs: How many samples the file was divided into.
+// Returns: The worst-case number of runs.
+// Side effects: None.
+// Notes: One extraction per sample, then an encode and a measurement per sample per iteration. Most searches stop long before this, which is why the phase closes early rather than counting down.
+pub(crate) fn search_steps(samples: usize) -> usize {
+    samples * (1 + 2 * MAX_ITERATIONS)
+}
 /// Seconds of video in each sample.
 const SAMPLE_SECONDS: f64 = 20.0;
 /// Aim for roughly one sample per this many seconds of source.
@@ -255,12 +264,12 @@ impl Drop for SampleSet {
 
 // AI-FUNC-SUMMARY: Copies short samples out of a source into the working directory; returns the samples, or an error when none could be taken; side effects: runs ffmpeg once per sample and writes temporary files.
 pub(crate) fn extract_samples(
-    ffmpeg: &str,
     input: &Path,
     video: &VideoInfo,
     plan: SamplePlan,
     work_dir: &Path,
     stamp: u128,
+    run: StreamedRunner<'_>,
 ) -> Result<SampleSet, String> {
     let mut paths = Vec::new();
     let mut set = SampleSet { paths: Vec::new() };
@@ -271,13 +280,15 @@ pub(crate) fn extract_samples(
     {
         let path = work_dir.join(format!("{}sample-{stamp}-{index}.mkv", super::TEMP_PREFIX));
         let args = build_sample_args(input, start, plan.duration, &path);
-        let output = process_command(ffmpeg)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|err| format!("failed to run ffmpeg to take a sample: {err}"))?;
+        let output = run(
+            &args,
+            StreamedRun {
+                phase: Phase::Choosing,
+                duration_seconds: plan.duration,
+                step: index + 1,
+                steps: search_steps(plan.count),
+            },
+        )?;
 
         // A sample that could not be taken is skipped rather than fatal: the
         // remaining samples still describe the file well enough.
@@ -294,60 +305,91 @@ pub(crate) fn extract_samples(
     Ok(set)
 }
 
+/// One candidate setting, and everything needed to try it on the samples.
+pub(crate) struct Trial<'a> {
+    pub(crate) samples: &'a [PathBuf],
+    pub(crate) encoder: &'a str,
+    pub(crate) kind: EncoderKind,
+    pub(crate) quality: f64,
+    pub(crate) codec: TargetCodec,
+    pub(crate) video: &'a VideoInfo,
+    /// Which pass of the search this is, counting from zero, so its runs can be
+    /// placed inside the phase's worst case.
+    pub(crate) iteration: usize,
+    /// How long each sample is, as the denominator for each run.
+    pub(crate) duration: f64,
+}
+
 // AI-FUNC-SUMMARY: Encodes every sample at one quality setting and measures the result; returns the average score across the samples; side effects: runs ffmpeg twice per sample and writes then deletes temporary files.
-pub(crate) fn measure_trial(
-    ffmpeg: &str,
-    samples: &[PathBuf],
-    encoder: &str,
-    kind: EncoderKind,
-    quality: f64,
-    codec: TargetCodec,
-    video: &VideoInfo,
-) -> Result<u32, String> {
+pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result<u32, String> {
+    let Trial {
+        samples,
+        encoder,
+        kind,
+        quality,
+        codec,
+        video,
+        iteration,
+        duration,
+    } = trial;
     let quality_args = trial_quality_args(kind, quality);
     let pix_fmt = codec::required_pixel_format(encoder);
     let mut total = 0u64;
     let mut measured = 0u32;
 
-    for sample in samples {
+    // One extraction per sample happened before this, and each iteration
+    // encodes and then measures every sample.
+    let steps = search_steps(samples.len());
+    let base = samples.len() + iteration * 2 * samples.len();
+
+    for (index, sample) in samples.iter().enumerate() {
         let encoded = super::with_added_suffix(sample, ".trial.mkv");
         let args = build_trial_args(sample, encoder, &quality_args, pix_fmt, &encoded);
-        let run = process_command(ffmpeg)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|err| format!("failed to run ffmpeg for a trial encode: {err}"));
+        let encode = run(
+            &args,
+            StreamedRun {
+                phase: Phase::Choosing,
+                duration_seconds: duration,
+                step: base + index * 2 + 1,
+                steps,
+            },
+        );
 
-        let run = match run {
-            Ok(run) => run,
+        let encode = match encode {
+            Ok(encode) => encode,
             Err(err) => {
                 let _ = fs::remove_file(&encoded);
                 return Err(err);
             }
         };
 
-        if !run.status.success() {
-            let detail = first_error_line(&String::from_utf8_lossy(&run.stderr));
+        if !encode.status.success() {
+            let detail = first_error_line(&encode.stderr);
             let _ = fs::remove_file(&encoded);
             return Err(format!("trial encode failed: {detail}"));
         }
 
         // Trials are measured on every frame: the samples are short, and a
         // subsampled score on 20 seconds is too noisy to steer a search.
-        let score = vmaf::measure_vmaf(
-            ffmpeg,
-            &encoded,
-            sample,
-            video,
-            VmafOptions {
-                subsample: 1,
-                threads: 0,
+        let options = VmafOptions {
+            subsample: 1,
+            threads: 0,
+        };
+        let args = vmaf::build_vmaf_args(&encoded, sample, video, options, true);
+        let measurement = run(
+            &args,
+            StreamedRun {
+                phase: Phase::Choosing,
+                duration_seconds: duration,
+                step: base + index * 2 + 2,
+                steps,
             },
         );
         let _ = fs::remove_file(&encoded);
 
+        let score = measurement.and_then(|measurement| {
+            vmaf::score_from_output(measurement.status.success(), &measurement.stderr, 1)
+        });
         if let Ok(score) = score {
             total += u64::from(score.hundredths);
             measured += 1;

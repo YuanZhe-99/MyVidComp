@@ -199,6 +199,8 @@ enum WorkerEventType {
   fileAttempt('file_attempt'),
   fileProgress('file_progress'),
   copyProgress('copy_progress'),
+  phase('phase'),
+  runProgress('run_progress'),
   stage('stage'),
   qualitySearch('quality_search'),
   qualityMeasured('quality_measured'),

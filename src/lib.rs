@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod codec;
 mod ffi;
 mod options;
+mod progress;
 mod review;
 mod search;
 mod vmaf;
@@ -20,6 +21,7 @@ mod vmaf;
 // The codec tables are internal: they describe encoder families the pipeline
 // knows about, not a public contract.
 pub use ffi::{FfiEventCallback, FfiRunOptionsV1, MYVIDCOMP_FFI_ABI_VERSION};
+use progress::{FileProgress, MeasurePlan, Phase, PhaseWeights, RunProgress};
 pub use review::{ReviewDecision, ReviewItem, list_reviews, resolve_review, review_list_json};
 pub use vmaf::{VmafOptions, VmafScore};
 
@@ -306,8 +308,28 @@ pub enum Event {
     },
     FileProgress {
         index: usize,
+        /// How far through the whole file the work is, across every phase.
         percent: f64,
+        phase: String,
+        /// How far through the current phase alone the work is.
+        phase_percent: f64,
         speed: Option<String>,
+        eta_seconds: u64,
+    },
+    /// One phase of a file has begun. Sent even when the phase reports no
+    /// percentage of its own, so the interface can name what is happening.
+    PhaseStarted {
+        index: usize,
+        phase: String,
+        step: usize,
+        steps: usize,
+    },
+    /// How far the whole run has got. Separate from file progress because it
+    /// also moves when a file is skipped and no ffmpeg is running.
+    RunProgress {
+        processed: usize,
+        total: usize,
+        percent: f64,
         eta_seconds: u64,
     },
     CopyProgress {
@@ -550,13 +572,41 @@ fn event_json(event: &Event) -> String {
         Event::FileProgress {
             index,
             percent,
+            phase,
+            phase_percent,
             speed,
             eta_seconds,
         } => format!(
-            "{{\"type\":\"file_progress\",\"index\":{},\"percent\":{},\"speed\":{},\"eta_seconds\":{}}}",
+            "{{\"type\":\"file_progress\",\"index\":{},\"percent\":{},\"phase\":{},\"phase_percent\":{},\"speed\":{},\"eta_seconds\":{}}}",
             index,
             json_f64(*percent),
+            json_string(phase),
+            json_f64(*phase_percent),
             json_optional_string(speed.as_deref()),
+            eta_seconds
+        ),
+        Event::PhaseStarted {
+            index,
+            phase,
+            step,
+            steps,
+        } => format!(
+            "{{\"type\":\"phase\",\"index\":{},\"phase\":{},\"step\":{},\"steps\":{}}}",
+            index,
+            json_string(phase),
+            step,
+            steps
+        ),
+        Event::RunProgress {
+            processed,
+            total,
+            percent,
+            eta_seconds,
+        } => format!(
+            "{{\"type\":\"run_progress\",\"processed\":{},\"total\":{},\"percent\":{},\"eta_seconds\":{}}}",
+            processed,
+            total,
+            json_f64(*percent),
             eta_seconds
         ),
         Event::CopyProgress {
@@ -986,6 +1036,7 @@ fn run_workflow(
         events,
         terminal,
     );
+    ui.set_candidate_count(candidates.len());
 
     // Ask once whether this ffmpeg can measure quality. Without it the run
     // still works, it just cannot score results or judge a flexible conversion.
@@ -995,6 +1046,12 @@ fn run_workflow(
     if let Some(reason) = reason {
         ui.emit_capability_missing("libvmaf", &reason);
     }
+    // What a file passes through decides how its progress is divided up, and
+    // that is settled here so every file's bar is shaped the same way.
+    ui.set_phase_weights(
+        options.quality_mode == QualityMode::Search && support.available,
+        measure_plan(&options, support.available),
+    );
 
     let mut summary = RunSummary {
         skipped,
@@ -1110,6 +1167,7 @@ fn run_workflow(
                 ));
             }
         }
+        ui.finish_candidate();
     }
 
     if let Some(graceful_exit) = &graceful_exit {
@@ -3469,6 +3527,9 @@ fn transcode_item(
 
     for (index, plan) in plans.iter().enumerate() {
         let mut plan = *plan;
+        // Each attempt starts the phases over, so the progress it reports is
+        // placed inside the part of the file that is still to come.
+        ui.begin_attempt();
         // Tune the quality setting on samples before committing to a full
         // encode. The result replaces the estimate for this attempt only.
         if options.quality_mode == QualityMode::Search && ui.quality_available {
@@ -3556,20 +3617,28 @@ fn search_quality_for(
         .unwrap_or_default()
         .as_nanos();
 
-    ui.render_stage("Choosing quality settings");
-    let samples = match search::extract_samples(
-        &options.ffmpeg,
-        &item.input_path,
-        &item.video,
-        sample_plan,
-        &work_dir,
-        stamp,
-    ) {
+    // The closure borrows the progress UI, so it is built and dropped around
+    // each call rather than held for the whole search.
+    let extracted = {
+        let mut run = |args: &[String], streamed: StreamedRun| {
+            run_ffmpeg_streaming(&options.ffmpeg, args, streamed, ui)
+        };
+        search::extract_samples(
+            &item.input_path,
+            &item.video,
+            sample_plan,
+            &work_dir,
+            stamp,
+            &mut run,
+        )
+    };
+    let samples = match extracted {
         Ok(samples) => samples,
         Err(err) => {
             ui.log_warning(format!(
                 "Warning: could not tune quality for this file: {err}"
             ));
+            ui.finish_phase(Phase::Choosing);
             return fallback;
         }
     };
@@ -3594,15 +3663,25 @@ fn search_quality_for(
 
         let quality = search::quality_from_value(kind, candidate);
         let label = quality.label(kind);
-        match search::measure_trial(
-            &options.ffmpeg,
-            samples.paths(),
-            &plan.encoder.name,
-            kind,
-            candidate,
-            options.target_codec,
-            &item.video,
-        ) {
+        let trial = {
+            let mut run = |args: &[String], streamed: StreamedRun| {
+                run_ffmpeg_streaming(&options.ffmpeg, args, streamed, ui)
+            };
+            search::measure_trial(
+                search::Trial {
+                    samples: samples.paths(),
+                    encoder: &plan.encoder.name,
+                    kind,
+                    quality: candidate,
+                    codec: options.target_codec,
+                    video: &item.video,
+                    iteration,
+                    duration: sample_plan.duration,
+                },
+                &mut run,
+            )
+        };
+        match trial {
             Ok(score) => {
                 ui.emit_quality_search(iteration + 1, &plan.encoder.name, &label, Some(score));
                 tried.push((candidate, score));
@@ -3620,7 +3699,7 @@ fn search_quality_for(
         }
     }
 
-    match search::best_quality(&tried, options.quality_target) {
+    let chosen = match search::best_quality(&tried, options.quality_target) {
         Some((value, _score, reached)) => {
             if !reached {
                 ui.log_warning(
@@ -3631,7 +3710,9 @@ fn search_quality_for(
             search::quality_from_value(kind, value)
         }
         None => fallback,
-    }
+    };
+    ui.finish_phase(Phase::Choosing);
+    chosen
 }
 // AI-FUNC-SUMMARY: Lists the recoverable differences one encode plan introduces; returns a kind and sentence for each; side effects: none.
 fn plan_deviations(
@@ -3684,18 +3765,12 @@ fn assess_quality(
         };
     }
 
-    ui.render_stage("Measuring quality");
     let vmaf_options = VmafOptions {
         subsample: options.quality_check.subsample(),
         threads: options.quality_threads,
     };
-    let measured = vmaf::measure_vmaf(
-        &options.ffmpeg,
-        &item.temp_path,
-        &item.input_path,
-        &item.video,
-        vmaf_options,
-    );
+    let measured = measure_quality_with_progress(options, item, vmaf_options, ui);
+    ui.finish_phase(Phase::Measuring);
 
     match measured {
         Ok(score) => {
@@ -3733,6 +3808,34 @@ fn assess_quality(
             }
         }
     }
+}
+
+// AI-FUNC-SUMMARY:
+// Purpose: Measures a converted file against its source while reporting how far the comparison has got.
+// Inputs: Run options, the work item, the measurement settings and the progress UI.
+// Returns: The score or a user-facing error.
+// Side effects: Runs ffmpeg and emits progress events.
+// Notes: The score is printed on stderr while progress arrives on stdout, which is why this streams rather than waiting for the process to end.
+fn measure_quality_with_progress(
+    options: &RunOptions,
+    item: &WorkItem,
+    vmaf_options: VmafOptions,
+    ui: &mut ProgressUi,
+) -> Result<VmafScore, String> {
+    let args = vmaf::build_vmaf_args(
+        &item.temp_path,
+        &item.input_path,
+        &item.video,
+        vmaf_options,
+        true,
+    );
+    let run = run_ffmpeg_streaming(
+        &options.ffmpeg,
+        &args,
+        StreamedRun::single(Phase::Measuring, item.video.duration_seconds),
+        ui,
+    )?;
+    vmaf::score_from_output(run.status.success(), &run.stderr, vmaf_options.subsample)
 }
 
 // AI-FUNC-SUMMARY: Commits a finished conversion, either replacing the original or keeping both for review; returns the conversion sizes or a terminal error; side effects: moves files and may write a review record.
@@ -3807,8 +3910,13 @@ fn execute_transcode_attempt(
     remove_failed_attempt_output(&item.temp_path)?;
 
     let args = build_ffmpeg_args_for_plan(item, plan, options.target_codec);
-    let run = run_ffmpeg_with_progress(&options.ffmpeg, &args, item, plan.encoder, ui)
-        .map_err(TranscodeAttemptError::terminal)?;
+    let run = run_ffmpeg_streaming(
+        &options.ffmpeg,
+        &args,
+        StreamedRun::single(Phase::Encoding, item.video.duration_seconds),
+        ui,
+    )
+    .map_err(TranscodeAttemptError::terminal)?;
     if !run.status.success() {
         let message = if run.stderr.trim().is_empty() {
             format!("ffmpeg exited with status {}", run.status)
@@ -3938,6 +4046,10 @@ fn validate_or_repair_output(
     metadata_filter: Option<&str>,
     ui: &mut ProgressUi,
 ) -> Result<(), String> {
+    // Validation is several quick ffprobe calls, so it reports that it is
+    // happening rather than pretending to have a percentage. The second step
+    // exists for the metadata repair, which is a real ffmpeg run.
+    ui.start_phase(Phase::Validating, 2);
     match validate_output_for_plan(&options.ffprobe, &item.temp_path, item, plan, codec) {
         Ok(()) => Ok(()),
         Err(first_err) => {
@@ -4287,6 +4399,9 @@ fn repair_av1_metadata(
     filter: &str,
     ui: &mut ProgressUi,
 ) -> Result<(), String> {
+    // The second step of validating: a remux that rewrites the metadata the
+    // first pass rejected.
+    ui.start_phase_step(Phase::Validating, 2, 2);
     ui.render_stage("repairing AV1 metadata");
     let repair_path = metadata_repair_temp_path(&item.temp_path);
     let backup_path = metadata_backup_temp_path(&item.temp_path);
@@ -4789,14 +4904,75 @@ struct FfmpegRunOutput {
     stderr: String,
 }
 
-// AI-FUNC-SUMMARY: Runs ffmpeg while reporting progress; returns exit status plus captured stderr or process-management error; side effects: starts ffmpeg and emits progress events.
-fn run_ffmpeg_with_progress(
+/// What one streamed ffmpeg run is doing, so its progress can be placed inside
+/// the file it belongs to.
+#[derive(Debug, Clone, Copy)]
+struct StreamedRun {
+    phase: Phase,
+    /// Seconds of video this run works through, as the denominator.
+    duration_seconds: f64,
+    /// Which run this is inside its phase, counting from one, and the worst
+    /// case the phase allows for.
+    step: usize,
+    steps: usize,
+}
+
+impl StreamedRun {
+    // AI-FUNC-SUMMARY: Describes a run that is the only one of its phase; returns the description; side effects: none.
+    fn single(phase: Phase, duration_seconds: f64) -> Self {
+        Self {
+            phase,
+            duration_seconds,
+            step: 1,
+            steps: 1,
+        }
+    }
+}
+
+/// The flags that make ffmpeg report where it has got to, kept in one place so
+/// no long-running call can be added without them.
+const PROGRESS_ARGS: [&str; 4] = ["-stats_period", "1", "-progress", "pipe:1"];
+
+/// How the quality search runs its ffmpeg calls.
+///
+/// The search builds arguments and reads results; running them belongs to the
+/// caller, which is what keeps the progress machinery out of that module and
+/// its own logic testable without a process.
+type StreamedRunner<'a> =
+    &'a mut dyn FnMut(&[String], StreamedRun) -> Result<FfmpegRunOutput, String>;
+
+// AI-FUNC-SUMMARY:
+// Purpose: Decides how thoroughly this run will compare results against their sources.
+// Inputs: The run options and whether measurement is possible at all.
+// Returns: The measurement plan the progress weights are built from.
+// Side effects: None.
+// Notes: A flexible run measures even when the check is off, because a conversion with deviations is always scored.
+fn measure_plan(options: &RunOptions, quality_available: bool) -> MeasurePlan {
+    if !quality_available {
+        return MeasurePlan::None;
+    }
+    match options.quality_check {
+        QualityCheck::Full => MeasurePlan::Full,
+        QualityCheck::Sampled => MeasurePlan::Sampled,
+        QualityCheck::Off => {
+            if options.preservation == Preservation::Flexible {
+                MeasurePlan::Sampled
+            } else {
+                MeasurePlan::None
+            }
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Runs ffmpeg while reporting progress for the current file phase; returns exit status plus captured stderr or process-management error; side effects: starts ffmpeg and emits progress events.
+fn run_ffmpeg_streaming(
     ffmpeg: &str,
     args: &[String],
-    item: &WorkItem,
-    encoder: &Encoder,
+    run: StreamedRun,
     ui: &mut ProgressUi,
 ) -> Result<FfmpegRunOutput, String> {
+    ui.enter_phase(run);
+
     let mut child = process_command(ffmpeg)
         .args(args)
         .stdin(Stdio::null())
@@ -4822,7 +4998,7 @@ fn run_ffmpeg_with_progress(
         let line = line.map_err(|err| format!("failed reading ffmpeg progress: {err}"))?;
         if let Some(update) = parse_progress_line(&line) {
             snapshot.apply(update);
-            ui.render_file_progress(item, encoder, &snapshot);
+            ui.render_file_progress(run, &snapshot);
         }
     }
 
@@ -5414,6 +5590,7 @@ fn move_validated_output_with_ui(
     destination: &Path,
     ui: &mut ProgressUi,
 ) -> Result<(), String> {
+    ui.start_phase(Phase::Committing, 1);
     let started_at = Instant::now();
     move_validated_output_with_progress(source, destination, |copied, total| {
         ui.render_copy_progress(copied, total, started_at);
@@ -5602,6 +5779,12 @@ struct ProgressUi<'a> {
     /// so a review record can say how the file was produced.
     last_encoder: String,
     last_quality: String,
+    /// How far the file in progress and the run as a whole have got.
+    file: FileProgress,
+    run: RunProgress,
+    /// The phase weights every file in this run starts from, decided once from
+    /// the settings so no file's bar can be shaped differently.
+    weights: PhaseWeights,
 }
 
 struct GracefulExit {
@@ -5700,6 +5883,7 @@ impl<'a> ProgressUi<'a> {
         terminal: bool,
     ) -> Self {
         let now = Instant::now();
+        let weights = PhaseWeights::new(false, MeasurePlan::None);
         Self {
             total_files,
             current_index: 0,
@@ -5712,6 +5896,9 @@ impl<'a> ProgressUi<'a> {
             quality_available: false,
             last_encoder: String::new(),
             last_quality: String::new(),
+            file: FileProgress::new(weights),
+            run: RunProgress::default(),
+            weights,
         }
     }
 
@@ -5722,6 +5909,79 @@ impl<'a> ProgressUi<'a> {
     // AI-FUNC-SUMMARY: Records whether quality can be measured in this run; returns none; side effects: updates progress state.
     fn set_quality_available(&mut self, available: bool) {
         self.quality_available = available;
+    }
+
+    // AI-FUNC-SUMMARY: Records how many candidates the run will work through; returns none; side effects: updates progress state.
+    fn set_candidate_count(&mut self, total: usize) {
+        self.run = RunProgress::new(total);
+    }
+
+    // AI-FUNC-SUMMARY: Decides how much of each file the phases account for in this run; returns none; side effects: updates progress state.
+    fn set_phase_weights(&mut self, searching: bool, measuring: MeasurePlan) {
+        self.weights = PhaseWeights::new(searching, measuring);
+    }
+
+    // AI-FUNC-SUMMARY: Records that the run is finished with one candidate, converted, failed or skipped; returns none; side effects: updates progress state and reports the run's progress.
+    fn finish_candidate(&mut self) {
+        self.run.finish_candidate();
+        let (processed, total) = self.run.counts();
+        let percent = self.run.percent(0.0);
+        let eta = estimate_eta(percent, self.started_at.elapsed());
+        self.events.on_event(Event::RunProgress {
+            processed,
+            total,
+            percent,
+            eta_seconds: eta.as_secs(),
+        });
+    }
+
+    // AI-FUNC-SUMMARY: Moves the file in progress into the phase a streamed run belongs to; returns none; side effects: updates progress state and emits a phase event.
+    fn enter_phase(&mut self, run: StreamedRun) {
+        if self.file.phase() != run.phase {
+            self.file.finish_before(run.phase);
+            self.file.enter(run.phase, run.steps);
+        } else if self.file.step().1 != run.steps {
+            self.file.enter(run.phase, run.steps);
+        }
+        self.file.enter_step(run.step);
+        self.emit_phase(run.phase, run.step, run.steps);
+    }
+
+    // AI-FUNC-SUMMARY: Announces which phase of a file is under way; returns none; side effects: emits a phase event.
+    fn emit_phase(&mut self, phase: Phase, step: usize, steps: usize) {
+        self.events.on_event(Event::PhaseStarted {
+            index: self.current_index,
+            phase: phase.as_str().to_string(),
+            step,
+            steps,
+        });
+    }
+
+    // AI-FUNC-SUMMARY: Closes one phase of the file in progress, whether or not it ran its worst case; returns none; side effects: updates progress state and reports progress.
+    fn finish_phase(&mut self, phase: Phase) {
+        self.file.finish(phase);
+        self.emit_progress(None);
+    }
+
+    // AI-FUNC-SUMMARY: Records that a fresh encode attempt is starting; returns none; side effects: pins the progress reached so far so the retry cannot move the bar backwards.
+    fn begin_attempt(&mut self) {
+        self.file.begin_attempt();
+    }
+
+    // AI-FUNC-SUMMARY: Moves the file into a phase that has no percentage of its own; returns none; side effects: updates progress state and reports progress.
+    fn start_phase(&mut self, phase: Phase, steps: usize) {
+        self.start_phase_step(phase, 1, steps);
+    }
+
+    // AI-FUNC-SUMMARY: Moves the file to one step of a phase that has no percentage of its own; returns none; side effects: updates progress state and reports progress.
+    fn start_phase_step(&mut self, phase: Phase, step: usize, steps: usize) {
+        self.enter_phase(StreamedRun {
+            phase,
+            duration_seconds: 0.0,
+            step,
+            steps,
+        });
+        self.emit_progress(None);
     }
 
     // AI-FUNC-SUMMARY: Reports a finished quality measurement; returns none; side effects: emits an event and prints a terminal line.
@@ -5835,7 +6095,8 @@ impl<'a> ProgressUi<'a> {
         self.wait_until_prompt_inactive();
         self.current_index = index;
         self.file_started_at = Instant::now();
-        let quality = item.quality_label(encoder, TargetCodec::Av1);
+        self.file = FileProgress::new(self.weights);
+        let quality = item.quality_label(encoder, self.codec);
         self.events.on_event(Event::FileStarted {
             index: self.current_index,
             total: self.total_files,
@@ -5904,46 +6165,61 @@ impl<'a> ProgressUi<'a> {
     }
 
     // AI-FUNC-SUMMARY: Provides render file progress behavior; returns the declared result; side effects: see implementation.
-    fn render_file_progress(
-        &mut self,
-        item: &WorkItem,
-        encoder: &Encoder,
-        snapshot: &ProgressSnapshot,
-    ) {
+    fn render_file_progress(&mut self, run: StreamedRun, snapshot: &ProgressSnapshot) {
         if self.prompt_active() {
             return;
         }
 
-        let percent = snapshot
+        let fraction = snapshot
             .out_time_seconds
-            .zip(nonzero(item.video.duration_seconds))
-            .map(|(out, duration)| (out / duration * 100.0).clamp(0.0, 100.0))
+            .zip(nonzero(run.duration_seconds))
+            .map(|(out, duration)| (out / duration).clamp(0.0, 1.0))
             .unwrap_or(0.0);
+        self.file.advance(fraction);
+        self.emit_progress(snapshot.speed.clone());
+    }
+
+    // AI-FUNC-SUMMARY: Reports where the file and the run have got to; returns none; side effects: emits progress events and redraws the terminal line.
+    fn emit_progress(&mut self, speed: Option<String>) {
+        let percent = self.file.percent();
+        self.file.hold(percent);
+        let phase = self.file.phase();
+        let phase_percent = self.file.phase_percent();
         let eta = estimate_eta(percent, self.file_started_at.elapsed());
-        let speed = snapshot.speed.clone();
         self.events.on_event(Event::FileProgress {
             index: self.current_index,
             percent,
+            phase: phase.as_str().to_string(),
+            phase_percent,
             speed: speed.clone(),
             eta_seconds: eta.as_secs(),
         });
+
+        let overall = self.run.percent(percent);
+        let (processed, total) = self.run.counts();
+        let overall_eta = estimate_eta(overall, self.started_at.elapsed());
+        self.events.on_event(Event::RunProgress {
+            processed,
+            total,
+            percent: overall,
+            eta_seconds: overall_eta.as_secs(),
+        });
+
         if !self.terminal {
             return;
         }
 
-        let bar = progress_bar(percent);
-        let speed = speed.as_deref().unwrap_or("?");
-
         eprint!(
-            "\r[{}/{}] {} {:>5.1}% speed={} eta={} encoder={} quality={}    ",
+            "\r[{}/{}] {} {:>5.1}% {} speed={} eta={}  all {:>5.1}% eta={}    ",
             self.current_index,
             self.total_label(),
-            bar,
+            progress_bar(percent),
             percent,
-            speed,
+            phase.label(),
+            speed.as_deref().unwrap_or("?"),
             format_duration(eta),
-            encoder.name,
-            item.quality_label(encoder, TargetCodec::Av1)
+            overall,
+            format_duration(overall_eta)
         );
         let _ = io::stderr().flush();
     }
@@ -5964,6 +6240,9 @@ impl<'a> ProgressUi<'a> {
         let elapsed = started_at.elapsed();
         let speed = copy_speed_label(copied, elapsed);
         let eta = estimate_eta(percent, elapsed);
+        // The commit is the last phase of the file, so its own percentage also
+        // carries the file's bar the rest of the way.
+        self.file.advance(percent / 100.0);
         self.events.on_event(Event::CopyProgress {
             index: self.current_index,
             percent,
@@ -6016,6 +6295,10 @@ impl<'a> ProgressUi<'a> {
     // AI-FUNC-SUMMARY: Provides finish file behavior; returns the declared result; side effects: see implementation.
     fn finish_file(&mut self, status: &str) {
         self.wait_until_prompt_inactive();
+        // Whatever the file did or did not go through, it is done with, so its
+        // bar ends full rather than wherever the last phase left it.
+        self.file.finish(Phase::Committing);
+        self.file.hold(100.0);
         if !self.terminal {
             return;
         }
@@ -6036,6 +6319,9 @@ impl<'a> ProgressUi<'a> {
             path: path.to_path_buf(),
             reason: reason.to_string(),
         });
+        // A skipped candidate is one the run is finished with, so the run's
+        // own progress moves even though nothing was converted.
+        self.finish_candidate();
     }
 
     // AI-FUNC-SUMMARY: Emits a file-finished event; returns none; side effects: sends a structured event.
@@ -7496,6 +7782,40 @@ target_folder: "\\\\server\\share\\videos"
         assert_eq!(
             event_json(&event),
             "{\"type\":\"log\",\"level\":\"warning\",\"message\":\"quote \\\" slash \\\\ newline\\n\"}"
+        );
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies the progress events carry the phase and the run totals a front end draws two bars from; returns test assertion result; side effects: none.
+    fn serializes_progress_events_as_json() {
+        assert_eq!(
+            event_json(&Event::FileProgress {
+                index: 2,
+                percent: 41.25,
+                phase: "encoding".to_string(),
+                phase_percent: 68.5,
+                speed: Some("1.8x".to_string()),
+                eta_seconds: 320,
+            }),
+            "{\"type\":\"file_progress\",\"index\":2,\"percent\":41.250,\"phase\":\"encoding\",\"phase_percent\":68.500,\"speed\":\"1.8x\",\"eta_seconds\":320}"
+        );
+        assert_eq!(
+            event_json(&Event::PhaseStarted {
+                index: 2,
+                phase: "measuring".to_string(),
+                step: 1,
+                steps: 2,
+            }),
+            "{\"type\":\"phase\",\"index\":2,\"phase\":\"measuring\",\"step\":1,\"steps\":2}"
+        );
+        assert_eq!(
+            event_json(&Event::RunProgress {
+                processed: 7,
+                total: 50,
+                percent: 14.0,
+                eta_seconds: 5400,
+            }),
+            "{\"type\":\"run_progress\",\"processed\":7,\"total\":50,\"percent\":14.000,\"eta_seconds\":5400}"
         );
     }
 

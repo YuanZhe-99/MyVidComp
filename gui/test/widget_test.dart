@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:myvidcomp_gui/app_controller.dart';
 import 'package:myvidcomp_gui/app_localizations.dart';
 import 'package:myvidcomp_gui/app_settings.dart';
+import 'package:myvidcomp_gui/core_ffi.dart';
 import 'package:myvidcomp_gui/main.dart';
 import 'package:myvidcomp_gui/media_tools.dart';
 
@@ -67,6 +68,8 @@ Future<void> _scrollTo(WidgetTester tester, Finder target) async {
 }
 
 void main() {
+  _progressTests();
+
   group('wording', () {
     test('every language defines exactly the same keys', () {
       final english = AppText.forCode('en');
@@ -337,6 +340,180 @@ void main() {
       )) {
         expect(indicator.value, isNotNull);
       }
+    });
+
+    testWidgets('measuring shows how far it has got, not a spinner', (
+      tester,
+    ) async {
+      final controller = _testController();
+      // A file part-way through its quality measurement: the phase that used
+      // to animate with no number behind it.
+      controller.handleEvent(
+        _event('file_started', {
+          'index': 1,
+          'total': 4,
+          'input_path': r'D:\videos\holiday.mp4',
+        }),
+      );
+      controller.handleEvent(
+        _event('phase', {'phase': 'measuring', 'step': 1, 'steps': 2}),
+      );
+      controller.handleEvent(
+        _event('file_progress', {
+          'percent': 84.0,
+          'phase': 'measuring',
+          'phase_percent': 30.0,
+          'speed': '9.4x',
+          'eta_seconds': 40,
+        }),
+      );
+      controller.handleEvent(
+        _event('run_progress', {
+          'processed': 0,
+          'total': 4,
+          'percent': 21.0,
+          'eta_seconds': 900,
+        }),
+      );
+
+      await _pumpAt(tester, const Size(1000, 900), controller: controller);
+      final text = AppText.forCode('en');
+      await tester.tap(find.text(text.navActivity).first);
+      await tester.pumpAndSettle();
+
+      final bars = tester
+          .widgetList<LinearProgressIndicator>(
+            find.byType(LinearProgressIndicator),
+          )
+          .toList();
+      expect(bars, isNotEmpty);
+      for (final bar in bars) {
+        expect(bar.value, isNotNull);
+      }
+      expect(bars.first.value, closeTo(0.84, 0.001));
+      expect(find.text(text.statusMeasuring), findsOneWidget);
+    });
+  });
+}
+
+// AI-FUNC-SUMMARY: Builds one engine event the way the worker delivers it; returns the event; side effects: none.
+WorkerEvent _event(String type, Map<String, Object?> data) =>
+    WorkerEvent(type, {'type': type, ...data});
+
+void _progressTests() {
+  group('progress', () {
+    test('every phase of a file reports a percentage that only grows', () {
+      final controller = _testController();
+      final seen = <double>[];
+
+      controller.handleEvent(
+        _event('scan_finished', {'candidates': 3, 'skipped': 0}),
+      );
+      controller.handleEvent(
+        _event('file_started', {
+          'index': 1,
+          'total': 3,
+          'input_path': r'D:\videos\holiday.mp4',
+        }),
+      );
+
+      const phases = [
+        'choosing',
+        'encoding',
+        'measuring',
+        'validating',
+        'committing',
+      ];
+      var percent = 0.0;
+      for (final phase in phases) {
+        controller.handleEvent(
+          _event('phase', {'phase': phase, 'step': 1, 'steps': 1}),
+        );
+        for (var tenth = 0; tenth <= 10; tenth++) {
+          percent += 1.5;
+          controller.handleEvent(
+            _event('file_progress', {
+              'percent': percent,
+              'phase': phase,
+              'phase_percent': tenth * 10.0,
+              'speed': '1.8x',
+              'eta_seconds': 120,
+            }),
+          );
+          seen.add(controller.fileProgress);
+        }
+      }
+
+      for (var index = 1; index < seen.length; index++) {
+        expect(seen[index], greaterThanOrEqualTo(seen[index - 1]));
+      }
+      expect(controller.speed, '1.8x');
+      expect(controller.fileRemaining, const Duration(seconds: 120));
+    });
+
+    test('the run bar moves when a file is skipped', () {
+      final controller = _testController();
+      expect(controller.overallProgress, 0);
+
+      controller.handleEvent(
+        _event('run_progress', {
+          'processed': 4,
+          'total': 10,
+          'percent': 40.0,
+          'eta_seconds': 600,
+        }),
+      );
+
+      expect(controller.overallProgress, 40.0);
+      expect(controller.overallRemaining, const Duration(minutes: 10));
+    });
+
+    test('a measuring phase is a stage the interface can name', () {
+      final controller = _testController();
+
+      controller.handleEvent(
+        _event('phase', {'phase': 'measuring', 'step': 1, 'steps': 2}),
+      );
+      expect(controller.stage, RunStage.measuring);
+
+      controller.handleEvent(
+        _event('phase', {'phase': 'choosing', 'step': 3, 'steps': 39}),
+      );
+      expect(controller.stage, RunStage.tuning);
+      expect(controller.trial, 3);
+      expect(controller.trials, 39);
+    });
+
+    test('a trial keeps its numbers rather than an English sentence', () {
+      final controller = _testController();
+
+      controller.handleEvent(
+        _event('quality_search', {
+          'iteration': 1,
+          'encoder': 'libsvtav1',
+          'quality': 'crf=28',
+          'score': 9530,
+        }),
+      );
+
+      final entry = controller.log.single;
+      expect(entry.kind, LogKind.trial);
+      expect(entry.score, 9530);
+      expect(entry.setting, 'crf=28');
+      expect(entry.message, isEmpty);
+    });
+
+    test('a log line carries how serious it is', () {
+      final controller = _testController();
+
+      controller.handleEvent(
+        _event('log', {
+          'level': 'warning',
+          'message': 'Warning: a trial encode failed',
+        }),
+      );
+
+      expect(controller.log.single.level, LogLevel.warning);
     });
   });
 }

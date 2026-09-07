@@ -10,7 +10,8 @@ use std::path::Path;
 use std::process::Stdio;
 
 use super::{
-    VideoInfo, first_error_line, normalized_pix_fmt, pixel_format_bit_depth, process_command,
+    PROGRESS_ARGS, VideoInfo, first_error_line, normalized_pix_fmt, pixel_format_bit_depth,
+    process_command,
 };
 
 /// A measured quality score, kept in hundredths of a VMAF point so it can cross
@@ -139,6 +140,7 @@ pub fn build_vmaf_args(
     reference: &Path,
     video: &VideoInfo,
     options: VmafOptions,
+    progress: bool,
 ) -> Vec<String> {
     let format = comparison_pixel_format(video);
     let model = model_for(video);
@@ -161,12 +163,22 @@ pub fn build_vmaf_args(
          [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest"
     );
 
-    vec![
+    let mut args = vec![
         "-hide_banner".to_string(),
         "-nostdin".to_string(),
+        // info is what makes libvmaf print its score line at all, and -nostats
+        // only silences ffmpeg's own status line, which would otherwise be
+        // mixed into the text the score is read from.
         "-loglevel".to_string(),
         "info".to_string(),
         "-nostats".to_string(),
+    ];
+    if progress {
+        // -nostats does not suppress this: the two are separate switches, and
+        // the null muxer opens no file, so stdout is free for the report.
+        args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
+    }
+    args.extend([
         // No -hwaccel here: the filter needs frames in system memory, and a
         // decoder that hands back hardware frames makes the graph fail.
         "-i".to_string(),
@@ -178,7 +190,25 @@ pub fn build_vmaf_args(
         "-f".to_string(),
         "null".to_string(),
         "-".to_string(),
-    ]
+    ]);
+    args
+}
+
+// AI-FUNC-SUMMARY: Turns finished ffmpeg output into a score; returns the score or a user-facing error; side effects: none.
+pub fn score_from_output(succeeded: bool, text: &str, subsample: u32) -> Result<VmafScore, String> {
+    if !succeeded {
+        return Err(format!(
+            "quality measurement failed: {}",
+            first_error_line(text)
+        ));
+    }
+
+    parse_vmaf_score(text)
+        .map(|hundredths| VmafScore {
+            hundredths,
+            subsample: subsample.max(1),
+        })
+        .ok_or_else(|| "quality measurement produced no score".to_string())
 }
 
 // AI-FUNC-SUMMARY: Reads the pooled score out of ffmpeg output; returns the score in hundredths or none when no score was printed; side effects: none.
@@ -203,41 +233,6 @@ pub fn parse_vmaf_score(text: &str) -> Option<u32> {
         }
     }
     found
-}
-
-// AI-FUNC-SUMMARY: Measures one converted file against its source; returns the score or a user-facing error; side effects: runs ffmpeg to completion, reading both files.
-pub fn measure_vmaf(
-    ffmpeg: &str,
-    distorted: &Path,
-    reference: &Path,
-    video: &VideoInfo,
-    options: VmafOptions,
-) -> Result<VmafScore, String> {
-    let args = build_vmaf_args(distorted, reference, video, options);
-    let output = process_command(ffmpeg)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|err| format!("failed to run ffmpeg to measure quality: {err}"))?;
-
-    let mut text = String::from_utf8_lossy(&output.stderr).to_string();
-    text.push_str(&String::from_utf8_lossy(&output.stdout));
-
-    if !output.status.success() {
-        return Err(format!(
-            "quality measurement failed: {}",
-            first_error_line(&text)
-        ));
-    }
-
-    parse_vmaf_score(&text)
-        .map(|hundredths| VmafScore {
-            hundredths,
-            subsample: options.subsample.max(1),
-        })
-        .ok_or_else(|| "quality measurement produced no score".to_string())
 }
 
 // AI-FUNC-SUMMARY: Reports whether a source is one VMAF cannot judge reliably; returns a caveat sentence or none; side effects: none.
@@ -314,6 +309,7 @@ mod tests {
                 subsample: 5,
                 threads: 4,
             },
+            false,
         );
 
         let joined = args.join(" ");
@@ -330,7 +326,46 @@ mod tests {
         assert!(joined.contains("setpts=PTS-STARTPTS"));
         assert!(joined.contains("[dist][ref]libvmaf"));
         assert!(!joined.contains("-hwaccel"));
+        assert!(!joined.contains("-progress"));
         assert!(joined.ends_with("-f null -"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies a measurement can report its progress without losing the switches its score depends on; returns nothing; side effects: none.
+    fn asks_for_progress_when_requested() {
+        let args = build_vmaf_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/clip.mkv"),
+            &video(1920, 1080, "yuv420p"),
+            VmafOptions::default(),
+            true,
+        );
+
+        let joined = args.join(" ");
+        assert!(joined.contains("-progress pipe:1"));
+        assert!(joined.contains("-stats_period 1"));
+        // The score is printed at info level, and -nostats silences only
+        // ffmpeg's own status line, not the progress report.
+        assert!(joined.contains("-loglevel info"));
+        assert!(joined.contains("-nostats"));
+
+        let progress = args.iter().position(|arg| arg == "-progress").unwrap();
+        let first_input = args.iter().position(|arg| arg == "-i").unwrap();
+        assert!(progress < first_input);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies finished output is turned into a score or a plain error; returns nothing; side effects: none.
+    fn reads_a_score_out_of_finished_output() {
+        let measured = score_from_output(true, "VMAF score: 95.50\n", 5).unwrap();
+        assert_eq!(measured.hundredths, 9550);
+        assert_eq!(measured.subsample, 5);
+
+        let failed = score_from_output(false, "Error opening input file\n", 1).unwrap_err();
+        assert!(failed.starts_with("quality measurement failed:"));
+
+        let scoreless = score_from_output(true, "nothing useful\n", 1).unwrap_err();
+        assert_eq!(scoreless, "quality measurement produced no score");
     }
 
     #[test]

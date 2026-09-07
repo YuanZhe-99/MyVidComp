@@ -23,6 +23,42 @@ enum RunStage {
 /// What happened to one file.
 enum FileOutcome { converted, skipped, failed, needsReview }
 
+/// How serious one line of the details log is.
+enum LogLevel { info, warning, error }
+
+/// What a line of the details log is describing.
+enum LogKind {
+  /// A sentence from the engine, shown as it arrived.
+  message,
+
+  /// One trial of a quality search, whose words are chosen when it is drawn.
+  trial,
+}
+
+/// One line of the details log.
+///
+/// A trial keeps its numbers rather than a sentence, so the line can be written
+/// in the language the person is reading rather than the engine's English.
+class LogEntry {
+  const LogEntry({
+    required this.level,
+    this.kind = LogKind.message,
+    this.message = '',
+    this.score,
+    this.setting,
+  });
+
+  final LogLevel level;
+  final LogKind kind;
+  final String message;
+
+  /// A measured score in hundredths, for a trial line.
+  final int? score;
+
+  /// The encoder setting that produced it, such as `crf=28`.
+  final String? setting;
+}
+
 /// One line in the progress list.
 class FileRecord {
   const FileRecord({
@@ -79,6 +115,12 @@ class AppController extends ChangeNotifier {
   int? _fileIndex;
   int? _totalFiles;
   double _fileProgress = 0;
+  double _overallProgress = 0;
+  String? _speed;
+  Duration? _fileRemaining;
+  Duration? _overallRemaining;
+  int _trial = 0;
+  int _trials = 0;
   String? _lastError;
   String? _notice;
 
@@ -90,7 +132,7 @@ class AppController extends ChangeNotifier {
   int _outputBytes = 0;
 
   final List<FileRecord> _records = [];
-  final List<String> _log = [];
+  final List<LogEntry> _log = [];
   List<PendingReview> _reviews = const [];
   bool _loadingReviews = false;
 
@@ -103,6 +145,19 @@ class AppController extends ChangeNotifier {
   int? get fileIndex => _fileIndex;
   int? get totalFiles => _totalFiles;
   double get fileProgress => _fileProgress;
+
+  /// How far the whole run has got, counting skipped files as done.
+  double get overallProgress => _overallProgress;
+
+  /// How much faster than real time the current step is running, as ffmpeg
+  /// reports it, or null when nothing is running.
+  String? get speed => _speed;
+  Duration? get fileRemaining => _fileRemaining;
+  Duration? get overallRemaining => _overallRemaining;
+
+  /// Which trial of a quality search is under way, and how many it may need.
+  int get trial => _trial;
+  int get trials => _trials;
   String? get lastError => _lastError;
   String? get notice => _notice;
   int get converted => _converted;
@@ -112,9 +167,21 @@ class AppController extends ChangeNotifier {
   int get sourceBytes => _sourceBytes;
   int get outputBytes => _outputBytes;
   List<FileRecord> get records => List.unmodifiable(_records);
-  List<String> get log => List.unmodifiable(_log);
+  List<LogEntry> get log => List.unmodifiable(_log);
   List<PendingReview> get reviews => List.unmodifiable(_reviews);
   bool get loadingReviews => _loadingReviews;
+
+  /// True while a run is under way, whether this interface started it or the
+  /// engine is reporting one already in flight.
+  bool get isActive =>
+      _running ||
+      const {
+        RunStage.scanning,
+        RunStage.tuning,
+        RunStage.converting,
+        RunStage.measuring,
+        RunStage.finishing,
+      }.contains(_stage);
 
   /// True once a folder is chosen and the tools were found.
   bool get canStart =>
@@ -253,7 +320,7 @@ class AppController extends ChangeNotifier {
     try {
       _worker = await WorkerController.start(
         request,
-        onEvent: _handleEvent,
+        onEvent: handleEvent,
         onDone: _handleDone,
         onLog: _pushLog,
       );
@@ -282,6 +349,12 @@ class AppController extends ChangeNotifier {
     _fileIndex = null;
     _totalFiles = null;
     _fileProgress = 0;
+    _overallProgress = 0;
+    _speed = null;
+    _fileRemaining = null;
+    _overallRemaining = null;
+    _trial = 0;
+    _trials = 0;
     _lastError = null;
     _converted = 0;
     _skipped = 0;
@@ -293,15 +366,17 @@ class AppController extends ChangeNotifier {
   }
 
   // AI-FUNC-SUMMARY: Applies one engine event to the interface state; returns none; side effects: updates state and notifies listeners.
-  void _handleEvent(WorkerEvent event) {
+  /// Visible so tests can drive a run without a native library behind it.
+  @visibleForTesting
+  void handleEvent(WorkerEvent event) {
     final data = event.data;
 
     switch (event.kind) {
       case WorkerEventType.log:
-        _pushLog(event.message ?? '');
+        _pushLog(event.message ?? '', _levelFor(data['level'] as String?));
       case WorkerEventType.capabilityMissing:
         _notice = data['detail'] as String?;
-        _pushLog(data['detail'] as String? ?? '');
+        _pushLog(data['detail'] as String? ?? '', LogLevel.warning);
       case WorkerEventType.scanStarted:
         _stage = RunStage.scanning;
       case WorkerEventType.scanFinished:
@@ -326,22 +401,39 @@ class AppController extends ChangeNotifier {
         _currentFile = _fileName(data['input_path'] as String? ?? '');
         _fileProgress = 0;
       case WorkerEventType.fileProgress:
-        _stage = RunStage.converting;
         _fileProgress = ((data['percent'] as num?) ?? 0).toDouble();
+        _speed = data['speed'] as String?;
+        _fileRemaining = _seconds(data['eta_seconds']);
+        _stage = _stageForPhase(data['phase'] as String?) ?? _stage;
+      case WorkerEventType.phase:
+        _stage = _stageForPhase(data['phase'] as String?) ?? _stage;
+        if (_stage == RunStage.tuning) {
+          _trial = data['step'] as int? ?? 0;
+          _trials = data['steps'] as int? ?? 0;
+        } else {
+          _trial = 0;
+          _trials = 0;
+        }
+      case WorkerEventType.runProgress:
+        _overallProgress = ((data['percent'] as num?) ?? 0).toDouble();
+        _overallRemaining = _seconds(data['eta_seconds']);
       case WorkerEventType.copyProgress:
         _stage = RunStage.finishing;
-        _fileProgress = ((data['percent'] as num?) ?? 0).toDouble();
       case WorkerEventType.stage:
-        final stage = (data['stage'] as String? ?? '').toLowerCase();
-        if (stage.contains('measuring')) {
-          _stage = RunStage.measuring;
-        } else if (stage.contains('choosing')) {
-          _stage = RunStage.tuning;
-        }
+        break;
       case WorkerEventType.qualitySearch:
         final score = data['score'] as int?;
         if (score != null) {
-          _pushLog('${data['quality']}: ${formatScore(score)}');
+          // Kept as numbers: the words around them are chosen when the line is
+          // drawn, in the language the person is reading.
+          _pushEntry(
+            LogEntry(
+              level: LogLevel.info,
+              kind: LogKind.trial,
+              score: score,
+              setting: data['quality'] as String?,
+            ),
+          );
         }
       case WorkerEventType.qualityMeasured:
         _lastScore = data['score'] as int?;
@@ -432,16 +524,47 @@ class AppController extends ChangeNotifier {
     unawaited(refreshReviews());
   }
 
-  // AI-FUNC-SUMMARY: Adds one line to the details log, keeping it from growing without bound; returns none; side effects: updates the log.
-  void _pushLog(String message) {
+  // AI-FUNC-SUMMARY: Adds one sentence from the engine to the details log; returns none; side effects: updates the log.
+  void _pushLog(String message, [LogLevel level = LogLevel.info]) {
     if (message.trim().isEmpty) {
       return;
     }
-    _log.insert(0, message);
+    _pushEntry(LogEntry(level: level, message: message));
+  }
+
+  // AI-FUNC-SUMMARY: Adds one line to the details log, keeping it from growing without bound; returns none; side effects: updates the log.
+  void _pushEntry(LogEntry entry) {
+    _log.insert(0, entry);
     if (_log.length > 500) {
       _log.removeRange(500, _log.length);
     }
     notifyListeners();
+  }
+
+  // AI-FUNC-SUMMARY: Maps an engine log level to how the line is shown; returns the level, defaulting to information; side effects: none.
+  static LogLevel _levelFor(String? level) => switch (level) {
+    'warning' => LogLevel.warning,
+    'error' => LogLevel.error,
+    _ => LogLevel.info,
+  };
+
+  // AI-FUNC-SUMMARY: Maps an engine phase name to the stage the interface shows; returns the stage, or none for an unknown phase; side effects: none.
+  static RunStage? _stageForPhase(String? phase) => switch (phase) {
+    'choosing' => RunStage.tuning,
+    'encoding' => RunStage.converting,
+    'measuring' => RunStage.measuring,
+    'validating' => RunStage.measuring,
+    'committing' => RunStage.finishing,
+    _ => null,
+  };
+
+  // AI-FUNC-SUMMARY: Turns a whole-second count from the engine into a duration; returns the duration, or none when it is missing or zero; side effects: none.
+  static Duration? _seconds(Object? value) {
+    final seconds = (value as num?)?.toInt();
+    if (seconds == null || seconds <= 0) {
+      return null;
+    }
+    return Duration(seconds: seconds);
   }
 
   // AI-FUNC-SUMMARY: Reduces a full path to the file name; returns the name; side effects: none.
@@ -459,22 +582,4 @@ class AppController extends ChangeNotifier {
     unawaited(_worker?.dispose());
     super.dispose();
   }
-}
-
-// AI-FUNC-SUMMARY: Formats a hundredths score for the details log; returns a one-decimal string; side effects: none.
-String formatScore(int hundredths) => (hundredths / 100).toStringAsFixed(1);
-
-// AI-FUNC-SUMMARY: Formats a byte count the way a person reads sizes; returns the short text; side effects: none.
-String formatBytes(int bytes) {
-  if (bytes < 1024) {
-    return '$bytes B';
-  }
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  var value = bytes / 1024;
-  var unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} ${units[unit]}';
 }
