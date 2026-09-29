@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myvidcomp_gui/app_controller.dart';
@@ -26,12 +28,25 @@ class _MemorySettingsStore implements SettingsStore {
   }
 }
 
+/// A review store with nothing pending, so tests never load the engine or read
+/// a real folder.
+class _EmptyReviewStore implements ReviewStore {
+  const _EmptyReviewStore();
+
+  @override
+  Future<List<PendingReview>> list(String folder) async => const [];
+
+  @override
+  Future<String?> resolve(String sidecarPath, String decision) async => null;
+}
+
 // AI-FUNC-SUMMARY: Builds a controller that reads nothing from disk; returns the controller; side effects: none.
 AppController _testController({
   AppSettings settings = AppSettings.defaults,
   bool toolsReady = true,
 }) => AppController(
   settingsStore: _MemorySettingsStore(settings),
+  reviewStore: const _EmptyReviewStore(),
   detectTools:
       ({String ffmpegOverride = '', String ffprobeOverride = ''}) async =>
           toolsReady
@@ -159,6 +174,27 @@ void main() {
   });
 
   group('settings', () {
+    test(
+      'saving replaces the file whole and leaves nothing beside it',
+      () async {
+        final dir = await Directory.systemTemp.createTemp(
+          'myvidcomp-settings-',
+        );
+        addTearDown(() => dir.delete(recursive: true));
+        final file = File('${dir.path}${Platform.pathSeparator}settings.json');
+        await file.writeAsString('{"old": true}\n');
+
+        await writeAtomically(file, '{"new": true}\n');
+
+        expect(await file.readAsString(), '{"new": true}\n');
+        final names = dir
+            .listSync()
+            .map((entry) => entry.uri.pathSegments.last)
+            .toList();
+        expect(names, ['settings.json']);
+      },
+    );
+
     test('a stored file survives a write and read cycle', () {
       const settings = AppSettings(
         targetFolder: '/videos',
@@ -521,6 +557,60 @@ void _progressTests() {
       );
 
       expect(controller.log.single.level, LogLevel.warning);
+    });
+
+    test('one engine event redraws the screen once', () {
+      final controller = _testController();
+      var notifications = 0;
+      controller.addListener(() => notifications += 1);
+
+      controller.handleEvent(
+        _event('quality_search', {
+          'iteration': 1,
+          'encoder': 'libsvtav1',
+          'quality': 'crf=28',
+          'score': 9530,
+        }),
+      );
+      controller.handleEvent(
+        _event('log', {'level': 'info', 'message': 'Info: scanning'}),
+      );
+
+      expect(notifications, 2);
+      expect(controller.log, hasLength(2));
+    });
+
+    test('files with the same name in two folders are kept apart', () {
+      final controller = _testController();
+
+      controller.handleEvent(
+        _event('review_pending', {
+          'original_path': r'D:\videos\a\clip.mp4',
+          'deviations': const <Object?>[],
+          'score': 9100,
+        }),
+      );
+      controller.handleEvent(
+        _event('file_finished', {
+          'status': 'converted',
+          'input_path': r'D:\videos\a\clip.mp4',
+          'message': 'kept for review',
+        }),
+      );
+      controller.handleEvent(
+        _event('file_finished', {
+          'status': 'converted',
+          'input_path': r'D:\videos\b\clip.mp4',
+          'message': 'converted',
+        }),
+      );
+
+      expect(controller.records.map((record) => record.outcome), [
+        FileOutcome.needsReview,
+        FileOutcome.converted,
+      ]);
+      expect(controller.records.last.path, r'D:\videos\b\clip.mp4');
+      expect(controller.converted, 1);
     });
   });
 }

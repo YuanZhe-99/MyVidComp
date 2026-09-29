@@ -14,6 +14,7 @@
 | `transcode_item` | function | 产出并提交一个通过校验的输出，同时允许在精确与适配编码器之间安全回退。 |
 | `search_quality_for` | function | 通过编码并测量若干短样本，为一个文件调定画质设置。 |
 | `plan_deviations` | function | 列出一个编码方案引入的可挽回差异，为每一项返回类别和一句说明。 |
+| `pixel_format_deviation` | function | 把像素格式转换描述为可挽回的差异，返回 `pixel_format` 类别和一句面向读者的说明。 |
 | `assess_quality` | function | 测量一次完成的转换，并判定它是否需要人来决定，返回该结果。 |
 | `finish_conversion` | function | 提交一次完成的转换，或替换原文件，或两份都留待复核，返回转换前后的体积或一条终止性错误。 |
 | `commit_for_review` | function | 把完成的转换放到未被触动的原文件旁边，并记录它为何需要决定，返回转换前后的体积或一条终止性错误。 |
@@ -23,17 +24,18 @@
 | `ffmpeg_failure_is_encoder_retryable` | function | 把一次 ffmpeg 失败判定为可安全回退编码器的情形，仅对已知的设备/编码器/格式能力诊断返回真。 |
 | `validation_failure_is_retryable` | function | 为编码器回退对严格输出校验失败分类，工具/进程/修复等基础设施故障返回假。 |
 | `validate_or_repair_output` | function | 校验或修复输出，返回成功、失败或测试断言结果。 |
-| `prepare_cached_temp_output` | function | 找出此前生成、且在当前精确或硬件适配策略下仍能通过校验的 MyVidComp 临时文件。 |
-| `validate_cached_output` | function | 按精确保真或当前硬件模式的适配校验一个缓存输出，两种允许的方案任一通过即返回成功。 |
+| `prepare_cached_temp_output` | function | 找出此前生成、且在当前精确或硬件适配策略下仍能通过校验的 MyVidComp 临时文件，连同其匹配方式一并返回。 |
+| `validate_cached_output` | function | 按本次运行要求的编解码器和复用临时输出的时长容差，以精确保真或当前硬件模式的适配校验一个缓存输出，返回其匹配的方案。 |
+| `cached_temp_deviations` | function | 列出复用的临时输出带有的可挽回差异，精确匹配时返回空，适配匹配时返回像素格式的变化。 |
 | `validation_error_may_need_remux_repair` | function | 检查一次校验失败能否通过不重新编码的重封装或 AV1 元数据修复解决，流数量和色彩/色度元数据失败时返回真。 |
-| `validation_error_indicates_unusable_temp` | function | 检查一次校验失败是否意味着临时输出无法安全重用，输出不可读或结构错误时返回真。 |
+| `validation_error_indicates_unusable_temp` | function | 检查一次校验失败是否意味着临时输出无法安全重用，无可读视频、时长为零或编解码器不是所要求的那个时返回真。 |
 | `remove_unusable_temp_output` | function | 在不可挽回的校验失败后删除临时输出，无返回值。 |
 | `is_temp_output_path` | function | 检查一个路径是否像本工具自己的转换临时输出，当前的 .myvidcomp-*.tmp.mp4/.mkv 名称和旧的 .pvac-* 名称都返回真。 |
 | `file_size` | function | 提供文件体积的行为，返回声明的结果。 |
 | `build_ffmpeg_args` | function | 为一次普通的精确 AV1 尝试构造 ffmpeg 参数，供测试使用，返回命令参数。 |
 | `build_ffmpeg_args_for_plan` | function | 为一次编码尝试构造 ffmpeg 参数，返回命令参数。 |
 | `ensure_metadata_bsf` | function | 检查当前 ffmpeg 构建是否带有某一种编码记录色彩元数据所需的比特流过滤器，返回成功或一条面向用户的错误。 |
-| `repair_av1_metadata` | function | 执行 AV1 元数据修复操作，返回操作状态或结果。 |
+| `repair_av1_metadata` | function | 重封装临时输出以改写 AV1 色彩元数据，返回成功或修复错误；会先删除残留的修复文件。 |
 | `build_av1_metadata_repair_args` | function | 构造或推导 AV1 元数据修复参数，返回算得的值。 |
 | `stream_map_args` | function | 依据探测到的实际流索引构造显式的 FFmpeg 映射，每个索引返回一对 -map，绝不使用宽泛映射。 |
 | `replace_with_repaired_output` | function | 执行以修复后的输出替换原输出的操作，返回操作状态或结果。 |
@@ -56,7 +58,8 @@
 | `mediacodec_args` | function | 构造每一次 Android 硬件编码都需要的参数，返回参数列表。 |
 | `encoder_quality_args` | function | 为一个编码器在一个设置下构造画质参数，返回参数列表。 |
 | `run_ffmpeg_with_progress` | function | 运行 ffmpeg 并同时报告进度，返回退出状态与捕获的 stderr，或进程管理错误。 |
-| `read_to_string` | function | 提供读取为字符串的行为，返回声明的结果。 |
-| `validate_output` | function | 校验输出条件，返回成功、失败或测试断言结果。 |
+| `read_to_string` | function | 把一个流读到结尾作为文字，替换无效的 UTF-8 字节，返回文字或读取错误。 |
+| `abandon_child` | function | 停止调用方已无法跟踪的 ffmpeg 子进程，无返回值；终止并回收它，并等待其 stderr 读取线程结束。 |
+| `validate_output` | function | 按本次运行要求的编解码器和给定的时长检查方式，以精确的源属性校验一个输出，返回成功或校验错误。 |
 | `validate_output_for_plan` | function | 对照精确或适配方案校验输出，返回成功或校验错误。 |
 | `validate_output_against` | function | 对照预期的主视频属性和源的流布局校验探测到的输出，返回成功或校验错误。 |

@@ -14,6 +14,7 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `transcode_item` | function | Produces and commits one validated output while allowing safe exact/adapted encoder fallback.. |
 | `search_quality_for` | function | Tunes the quality setting for one file by encoding and measuring short samples.. |
 | `plan_deviations` | function | Lists the recoverable differences one encode plan introduces, returning a kind and sentence for each. |
+| `pixel_format_deviation` | function | Describes a pixel-format conversion as a recoverable difference, returning the `pixel_format` kind and a reader-facing sentence. |
 | `assess_quality` | function | Measures a finished conversion and decides whether it needs a human decision, returning the outcome. |
 | `finish_conversion` | function | Commits a finished conversion, either replacing the original or keeping both for review, returning the conversion sizes or a terminal error. |
 | `commit_for_review` | function | Moves a finished conversion beside its untouched original and records why it needs a decision, returning the conversion sizes or a terminal error. |
@@ -23,17 +24,18 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `ffmpeg_failure_is_encoder_retryable` | function | Classifies an ffmpeg failure as a safe encoder fallback case, returning true only for known device/encoder/format capability diagnostics. |
 | `validation_failure_is_retryable` | function | Classifies strict output validation failures for encoder fallback, returning false for tool/process/repair infrastructure failures. |
 | `validate_or_repair_output` | function | Validates validate or repair output conditions, returning success, failure, or test assertion result. |
-| `prepare_cached_temp_output` | function | Finds a previously generated MyVidComp temp that validates under the current exact or hardware-adapted policy.. |
-| `validate_cached_output` | function | Validates a cached output against exact preservation or the current hardware-mode adaptation, returning success for either allowed plan. |
+| `prepare_cached_temp_output` | function | Finds a previously generated MyVidComp temp that validates under the current exact or hardware-adapted policy, returning it with how it matched. |
+| `validate_cached_output` | function | Validates a cached output against exact preservation or the current hardware-mode adaptation for the codec the run asked for, with the reused-temp duration tolerance, returning which plan it matched. |
+| `cached_temp_deviations` | function | Lists the recoverable differences a reused temp carries, returning nothing for an exact match and the pixel-format change for an adapted one. |
 | `validation_error_may_need_remux_repair` | function | Checks whether a validation failure may be fixed by a no-reencode remux or AV1 metadata repair, returning true for stream-count and color/chroma metadata failures. |
-| `validation_error_indicates_unusable_temp` | function | Checks whether a validation failure means a temp output cannot be safely reused, returning true for unreadable or structurally wrong outputs. |
+| `validation_error_indicates_unusable_temp` | function | Checks whether a validation failure means a temp output cannot be safely reused, returning true for no readable video, zero duration, or a codec other than the one asked for. |
 | `remove_unusable_temp_output` | function | Deletes a temp output after an unrecoverable validation failure, returning nothing. |
 | `is_temp_output_path` | function | Checks whether a path looks like a temporary conversion output owned by this tool, returning true for current .myvidcomp-*.tmp.mp4/.mkv names and legacy .pvac-* names. |
 | `file_size` | function | Provides file size behavior, returning the declared result. |
 | `build_ffmpeg_args` | function | Builds the ffmpeg arguments for a plain exact AV1 attempt, for tests, returning command arguments. |
 | `build_ffmpeg_args_for_plan` | function | Builds ffmpeg arguments for one encode attempt, returning command arguments. |
 | `ensure_metadata_bsf` | function | Checks that this ffmpeg build carries the bitstream filter one codec needs for colour metadata, returning success or a user-facing error. |
-| `repair_av1_metadata` | function | Performs repair av1 metadata operation, returning operation status or result. |
+| `repair_av1_metadata` | function | Remuxes a temp output to rewrite AV1 colour metadata, returning success or a repair error; removes a stale repair file first. |
 | `build_av1_metadata_repair_args` | function | Builds or derives build av1 metadata repair args data, returning the computed value. |
 | `stream_map_args` | function | Builds explicit FFmpeg mappings from actual probed stream indexes, returning one -map pair per index and never emits a broad map. |
 | `replace_with_repaired_output` | function | Performs replace with repaired output operation, returning operation status or result. |
@@ -56,7 +58,8 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `mediacodec_args` | function | Builds the arguments every Android hardware encode needs, returning the argument list. |
 | `encoder_quality_args` | function | Builds the quality arguments for one encoder at one setting, returning the argument list. |
 | `run_ffmpeg_with_progress` | function | Runs ffmpeg while reporting progress, returning exit status plus captured stderr or process-management error. |
-| `read_to_string` | function | Provides read to string behavior, returning the declared result. |
-| `validate_output` | function | Validates validate output conditions, returning success, failure, or test assertion result. |
+| `read_to_string` | function | Reads a stream to its end as text, replacing bytes that are not valid UTF-8, returning the text or a read error. |
+| `abandon_child` | function | Stops an ffmpeg child the caller can no longer follow, returning nothing; kills and reaps it and joins its stderr reader. |
+| `validate_output` | function | Validates an output against the exact source properties for the codec the run asked for, under the given duration check, returning success or a validation error. |
 | `validate_output_for_plan` | function | Validates output against an exact or adapted plan, returning success or validation error. |
 | `validate_output_against` | function | Validates probed output against expected primary-video properties and source stream layout, returning success or validation error. |

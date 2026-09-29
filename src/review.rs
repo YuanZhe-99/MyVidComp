@@ -6,10 +6,11 @@
 //! a small sidecar file recording what changed and how it scored. Nothing is
 //! deleted until the user decides.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{REVIEW_SUFFIX, format_quality, json_string, with_added_suffix};
+use super::{REVIEW_SUFFIX, format_quality, is_same_existing_file, json_string, with_added_suffix};
 
 /// Extension of the sidecar written next to every pending review file.
 const SIDECAR_EXTENSION: &str = "json";
@@ -119,25 +120,31 @@ pub(crate) fn is_review_artifact(path: &Path) -> bool {
         .is_some_and(|name| name.contains(REVIEW_SUFFIX))
 }
 
-// AI-FUNC-SUMMARY: Checks whether a source file already has a conversion waiting for a decision; returns true when a review file sits beside it; side effects: reads the containing directory.
-pub(crate) fn has_pending_review(input: &Path) -> bool {
-    let Some(stem) = input.file_stem().and_then(|value| value.to_str()) else {
-        return false;
+// AI-FUNC-SUMMARY:
+// Purpose: Lists, in one directory read, the source stems that already have a conversion waiting for a decision.
+// Inputs: The directory to read.
+// Returns: Every `<stem>` for which a `<stem>.myvidcomp-review.<ext>` file (not its sidecar) sits in the directory; empty when the directory cannot be read.
+// Side effects: Reads the directory once.
+// Notes: A source file has a pending review exactly when its file stem is in this set. Callers cache the set per directory so a scan reads each directory once instead of once per file.
+pub(crate) fn pending_review_stems(dir: &Path) -> HashSet<String> {
+    let marker = format!("{REVIEW_SUFFIX}.");
+    let mut stems = HashSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return stems;
     };
-    let Some(parent) = input.parent() else {
-        return false;
-    };
-    let prefix = format!("{stem}{REVIEW_SUFFIX}.");
-
-    let Ok(entries) = fs::read_dir(parent) else {
-        return false;
-    };
-    entries.filter_map(Result::ok).any(|entry| {
-        entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".json"))
-    })
+    for entry in entries.filter_map(Result::ok) {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if name.ends_with(".json") {
+            continue;
+        }
+        for (index, _) in name.match_indices(&marker) {
+            stems.insert(name[..index].to_string());
+        }
+    }
+    stems
 }
 // AI-FUNC-SUMMARY: Writes the sidecar describing one pending review; returns success or a disk error; side effects: creates or replaces the sidecar file.
 pub fn write_sidecar(item: &ReviewItem) -> Result<(), String> {
@@ -206,7 +213,7 @@ pub fn list_reviews(folder: &Path) -> Vec<ReviewItem> {
     items
 }
 
-// AI-FUNC-SUMMARY: Walks one directory level collecting review sidecars; returns nothing; side effects: reads directory entries and sidecar files and recurses into subdirectories.
+// AI-FUNC-SUMMARY: Walks one directory level collecting review sidecars; returns nothing; side effects: reads directory entries and sidecar files and recurses into real subdirectories, never through a symbolic link, so a link loop cannot recurse forever.
 fn collect_reviews(folder: &Path, items: &mut Vec<ReviewItem>) {
     let Ok(entries) = fs::read_dir(folder) else {
         return;
@@ -214,7 +221,7 @@ fn collect_reviews(folder: &Path, items: &mut Vec<ReviewItem>) {
 
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
-        if path.is_dir() {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
             collect_reviews(&path, items);
             continue;
         }
@@ -257,7 +264,7 @@ pub fn read_sidecar(sidecar_path: &Path) -> Option<ReviewItem> {
     (item.original_path.is_file() && item.review_path.is_file()).then_some(item)
 }
 
-// AI-FUNC-SUMMARY: Applies a decision to one pending review; returns success or a user-facing error; side effects: renames or deletes the reviewed files and removes the sidecar.
+// AI-FUNC-SUMMARY: Applies a decision to one pending review; returns success or a user-facing error; side effects: renames or deletes the reviewed files and removes the sidecar; keep-new refuses, before deleting anything, when a different file already holds the final name.
 pub fn resolve_review(sidecar_path: &Path, decision: &str) -> Result<(), String> {
     let decision = parse_review_decision(decision)?;
     let item = read_sidecar(sidecar_path).ok_or_else(|| {
@@ -269,6 +276,12 @@ pub fn resolve_review(sidecar_path: &Path, decision: &str) -> Result<(), String>
 
     match decision {
         ReviewDecision::KeepNew => {
+            if final_path_is_taken(&item) {
+                return Err(format!(
+                    "cannot keep the converted file: {} already exists and is not the original, so nothing was changed",
+                    item.final_path.to_string_lossy()
+                ));
+            }
             fs::remove_file(&item.original_path).map_err(|err| {
                 format!(
                     "failed to remove the original {}: {err}",
@@ -293,6 +306,18 @@ pub fn resolve_review(sidecar_path: &Path, decision: &str) -> Result<(), String>
 
     let _ = fs::remove_file(sidecar_path);
     Ok(())
+}
+
+// AI-FUNC-SUMMARY:
+// Purpose: Checks, before the original is deleted, whether keeping the new file would collide with some other file at its final name.
+// Inputs: The pending review item.
+// Returns: True when a file other than the original (or a symbolic link) already sits at the final name.
+// Side effects: Reads file metadata.
+// Notes: A final name that is the original itself, including a differently-cased name for the same file on a case-insensitive disk, is not a collision.
+fn final_path_is_taken(item: &ReviewItem) -> bool {
+    item.final_path != item.original_path
+        && fs::symlink_metadata(&item.final_path).is_ok()
+        && !is_same_existing_file(&item.final_path, &item.original_path)
 }
 
 // AI-FUNC-SUMMARY: Renames a review file to its destination without overwriting anything; returns success or a user-facing error; side effects: renames a file on disk.
@@ -395,7 +420,7 @@ fn deviations(text: &str) -> Vec<Deviation> {
         return Vec::new();
     };
     let rest = &text[start..];
-    let Some(end) = rest.find(']') else {
+    let Some(end) = closing_bracket(rest) else {
         return Vec::new();
     };
 
@@ -410,6 +435,29 @@ fn deviations(text: &str) -> Vec<Deviation> {
             })
         })
         .collect()
+}
+
+// AI-FUNC-SUMMARY: Finds the `]` that closes a JSON array, skipping any `]` inside a quoted string (escapes included); returns its byte offset or none when the array never closes; side effects: none.
+fn closing_bracket(text: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if in_string {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+        } else {
+            match character {
+                '"' => in_string = true,
+                ']' => return Some(index),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -509,6 +557,75 @@ mod tests {
         assert!(!item.review_path.exists());
         assert!(!item.sidecar_path.exists());
         assert!(item.final_path.is_file());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that keep-new leaves every file alone when a different file already holds the final name; returns nothing; side effects: creates and removes temporary files.
+    fn keep_new_refuses_when_another_file_holds_the_final_name() {
+        let dir = temp_dir("keep-new-taken");
+        let item = sample_pair(&dir);
+        fs::write(&item.final_path, b"someone-else").unwrap();
+
+        let err = resolve_review(&item.sidecar_path, "keep-new").unwrap_err();
+
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(fs::read(&item.original_path).unwrap(), b"original-bytes");
+        assert_eq!(fs::read(&item.review_path).unwrap(), b"new");
+        assert_eq!(fs::read(&item.final_path).unwrap(), b"someone-else");
+        assert!(item.sidecar_path.is_file());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that one directory read reports exactly the stems with a pending review file, ignoring sidecars; returns nothing; side effects: creates and removes temporary files.
+    fn pending_review_stems_reads_the_directory_once() {
+        let dir = temp_dir("pending-stems");
+        fs::write(dir.join("clip.mkv"), b"x").unwrap();
+        fs::write(dir.join("clip.myvidcomp-review.mp4"), b"x").unwrap();
+        fs::write(dir.join("other.myvidcomp-review.mp4.json"), b"{}").unwrap();
+        fs::write(dir.join("a-b.myvidcomp-review.mkv"), b"x").unwrap();
+
+        let stems = pending_review_stems(&dir);
+
+        let mut sorted = stems.into_iter().collect::<Vec<_>>();
+        sorted.sort();
+        assert_eq!(sorted, vec!["a-b".to_string(), "clip".to_string()]);
+        assert!(pending_review_stems(&dir.join("missing")).is_empty());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that deviation text holding brackets, quotes and backslashes survives a sidecar round trip; returns nothing; side effects: creates and removes temporary files.
+    fn deviation_text_with_brackets_round_trips() {
+        let dir = temp_dir("brackets");
+        let mut item = sample_pair(&dir);
+        item.deviations = vec![
+            Deviation::new("pixel_format", "Converted [yuv444p] to \"yuv420p\" \\ ok]"),
+            Deviation::new("dropped_stream", "Stream [2] was dropped."),
+        ];
+        write_sidecar(&item).unwrap();
+
+        let read = read_sidecar(&item.sidecar_path).unwrap();
+
+        assert_eq!(read.deviations, item.deviations);
+        assert_eq!(read.target, 9500);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that listing does not follow a symbolic link back into its own folder; returns nothing; side effects: creates and removes temporary files and a link.
+    fn listing_does_not_follow_a_directory_link_loop() {
+        let dir = temp_dir("link-loop");
+        sample_pair(&dir);
+        std::os::unix::fs::symlink(&dir, dir.join("loop")).unwrap();
+
+        assert_eq!(list_reviews(&dir).len(), 1);
 
         fs::remove_dir_all(&dir).ok();
     }

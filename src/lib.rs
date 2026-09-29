@@ -1,10 +1,10 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -959,6 +959,7 @@ fn run_workflow(
         ensure_tmp_dir(tmp_dir)?;
     }
 
+    let mut review_stems = HashMap::new();
     for path in files {
         if has_added_suffix(&path, ".old") {
             skipped += 1;
@@ -974,7 +975,7 @@ fn run_workflow(
         // which one to keep: converting the review file again would be
         // circular, and converting the original again would produce a second
         // pending pair.
-        if review::is_review_artifact(&path) || review::has_pending_review(&path) {
+        if review::is_review_artifact(&path) || has_pending_review(&path, &mut review_stems) {
             skipped += 1;
             events.on_event(Event::FileSkipped {
                 path,
@@ -2175,7 +2176,12 @@ impl WorkItem {
         let temp_path = temp_output_path(&input_path, tmp_dir, output_container);
         let recovery_path = with_added_suffix(&input_path, RECOVERY_SUFFIX);
 
-        if output_path != input_path && output_path.exists() {
+        // `clip.MP4` becomes `clip.mp4`, which on a case-insensitive disk is
+        // the source itself rather than a second file in the way.
+        if output_path != input_path
+            && output_path.exists()
+            && !is_same_existing_file(&output_path, &input_path)
+        {
             return Err(SkipReason::Conflict);
         }
 
@@ -3601,14 +3607,17 @@ fn transcode_item(
         ensure_metadata_bsf(&options.ffmpeg, options.target_codec)?;
     }
 
-    if let Some(cache_path) =
+    if let Some((cache_path, matched)) =
         prepare_cached_temp_output(options, item, metadata_filter.as_deref(), ui)?
     {
         let mut cached_item = item.clone();
         cached_item.temp_path = cache_path;
         // A reused temp still has to earn its place, so it is measured and can
         // still end up in review rather than replacing the original outright.
-        let outcome = assess_quality(options, &cached_item, &[], decoding, ui);
+        // An adapted temp reports its pixel-format change like a fresh
+        // adapted encode, so it is never committed silently.
+        let deviations = cached_temp_deviations(matched, item);
+        let outcome = assess_quality(options, &cached_item, &deviations, decoding, ui);
         return finish_conversion(options, &cached_item, outcome, ui);
     }
 
@@ -3829,16 +3838,21 @@ fn plan_deviations(
     let mut deviations = exemption_descriptions(&plan.exempt, options.target_codec);
 
     if let Some(target) = plan.kind.output_pix_fmt() {
-        let source = item.video.pix_fmt.as_deref().unwrap_or("the source format");
-        deviations.push((
-            "pixel_format".to_string(),
-            format!(
-                "Colour detail was converted from {source} to {target}. Most viewers will not see a difference."
-            ),
-        ));
+        deviations.push(pixel_format_deviation(item, target));
     }
 
     deviations
+}
+
+// AI-FUNC-SUMMARY: Describes a pixel-format conversion as a recoverable difference; returns the `pixel_format` kind and a reader-facing sentence; side effects: none.
+fn pixel_format_deviation(item: &WorkItem, target: &str) -> (String, String) {
+    let source = item.video.pix_fmt.as_deref().unwrap_or("the source format");
+    (
+        "pixel_format".to_string(),
+        format!(
+            "Colour detail was converted from {source} to {target}. Most viewers will not see a difference."
+        ),
+    )
 }
 
 // AI-FUNC-SUMMARY: Measures a finished conversion and decides whether it needs a human decision; returns the outcome; side effects: may run a long ffmpeg comparison and emit quality events.
@@ -4224,7 +4238,14 @@ fn validate_or_repair_output(
     // happening rather than pretending to have a percentage. The second step
     // exists for the metadata repair, which is a real ffmpeg run.
     ui.start_phase(Phase::Validating, 2);
-    match validate_output_for_plan(&options.ffprobe, &item.temp_path, item, plan, codec) {
+    match validate_output_for_plan(
+        &options.ffprobe,
+        &item.temp_path,
+        item,
+        plan,
+        codec,
+        DurationCheck::FreshEncode,
+    ) {
         Ok(()) => Ok(()),
         Err(first_err) => {
             let Some(filter) = metadata_filter else {
@@ -4238,8 +4259,15 @@ fn validate_or_repair_output(
             repair_av1_metadata(&options.ffmpeg, &options.ffprobe, item, filter, ui).map_err(
                 |repair_err| format!("{first_err}; metadata repair also failed: {repair_err}"),
             )?;
-            validate_output_for_plan(&options.ffprobe, &item.temp_path, item, plan, codec)
-                .map_err(|second_err| format!("{first_err}; after metadata repair: {second_err}"))
+            validate_output_for_plan(
+                &options.ffprobe,
+                &item.temp_path,
+                item,
+                plan,
+                codec,
+                DurationCheck::FreshEncode,
+            )
+            .map_err(|second_err| format!("{first_err}; after metadata repair: {second_err}"))
         }
     }
 }
@@ -4247,14 +4275,14 @@ fn validate_or_repair_output(
 // AI-FUNC-SUMMARY:
 // Purpose: Finds a previously generated MyVidComp temp that validates under the current exact or hardware-adapted policy.
 // Inputs: Runtime options, source work item, optional metadata repair filter, and progress UI.
-// Returns: A reusable cache path, none when caches are invalid, or a terminal probe/repair infrastructure error.
+// Returns: A reusable cache path with how it matched (exact or adapted), none when caches are invalid, or a terminal probe/repair infrastructure error.
 // Side effects: Runs probes, may metadata-repair or delete unusable MyVidComp temps, and emits progress/log events.
 fn prepare_cached_temp_output(
     options: &RunOptions,
     item: &WorkItem,
     metadata_filter: Option<&str>,
     ui: &mut ProgressUi,
-) -> Result<Option<PathBuf>, String> {
+) -> Result<Option<(PathBuf, CachedTempMatch)>, String> {
     let cached_paths = cached_temp_output_paths(&item.input_path, options.tmp_dir.as_deref());
     for cache_path in cached_paths {
         if cache_path == item.temp_path {
@@ -4269,12 +4297,12 @@ fn prepare_cached_temp_output(
         ));
 
         match validate_cached_output(options, &cache_path, &cached_item) {
-            Ok(()) => {
+            Ok(matched) => {
                 ui.log_info(format!(
                     "Info: reusing validated cached temp {}",
                     cache_path.to_string_lossy()
                 ));
-                return Ok(Some(cache_path));
+                return Ok(Some((cache_path, matched)));
             }
             Err(err) => {
                 if !validation_failure_is_retryable(&err) {
@@ -4306,12 +4334,12 @@ fn prepare_cached_temp_output(
         }
 
         match validate_cached_output(options, &cache_path, &cached_item) {
-            Ok(()) => {
+            Ok(matched) => {
                 ui.log_info(format!(
                     "Info: reusing validated cached temp {}",
                     cache_path.to_string_lossy()
                 ));
-                return Ok(Some(cache_path));
+                return Ok(Some((cache_path, matched)));
             }
             Err(err) => {
                 if !validation_failure_is_retryable(&err) {
@@ -4329,14 +4357,36 @@ fn prepare_cached_temp_output(
     Ok(None)
 }
 
-// AI-FUNC-SUMMARY: Validates a cached output against exact preservation or the current hardware-mode adaptation; returns success for either allowed plan; side effects: runs ffprobe.
+/// How a reused temp matched the source, so the differences it carries are
+/// reported exactly as a fresh encode of the same kind would report them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CachedTempMatch {
+    /// The temp preserves every checked property of the source.
+    Exact,
+    /// The temp was made by an earlier adapted attempt and carries this
+    /// converted pixel format.
+    Adapted { output_pix_fmt: &'static str },
+}
+
+// AI-FUNC-SUMMARY:
+// Purpose: Validates a cached output against exact preservation or the current hardware-mode adaptation.
+// Inputs: Run options (the target codec is the one this run asked for), the cached temp path, and the source work item.
+// Returns: Which plan the temp matched, or the validation error.
+// Side effects: Runs ffprobe.
+// Notes: Uses the reused-temp duration tolerance, which is stricter than a fresh encode's, because a stopped run leaves a temp that is only a little short.
 fn validate_cached_output(
     options: &RunOptions,
     path: &Path,
     item: &WorkItem,
-) -> Result<(), String> {
-    match validate_output(&options.ffprobe, path, item) {
-        Ok(()) => Ok(()),
+) -> Result<CachedTempMatch, String> {
+    match validate_output(
+        &options.ffprobe,
+        path,
+        item,
+        options.target_codec,
+        DurationCheck::ReusedTemp,
+    ) {
+        Ok(()) => Ok(CachedTempMatch::Exact),
         Err(exact_err)
             if options.encoder_preference == EncoderPreference::Gpu
                 && validation_failure_is_retryable(&exact_err) =>
@@ -4361,9 +4411,27 @@ fn validate_cached_output(
                 quality: EncoderQuality::Constant(0.0),
                 exempt: MetadataExemptions::default(),
             };
-            validate_output_for_plan(&options.ffprobe, path, item, &plan, options.target_codec)
+            validate_output_for_plan(
+                &options.ffprobe,
+                path,
+                item,
+                &plan,
+                options.target_codec,
+                DurationCheck::ReusedTemp,
+            )
+            .map(|()| CachedTempMatch::Adapted { output_pix_fmt })
         }
         Err(err) => Err(err),
+    }
+}
+
+// AI-FUNC-SUMMARY: Lists the recoverable differences a reused temp carries; returns nothing for an exact match and the pixel-format change for an adapted one; side effects: none.
+fn cached_temp_deviations(matched: CachedTempMatch, item: &WorkItem) -> Vec<(String, String)> {
+    match matched {
+        CachedTempMatch::Exact => Vec::new(),
+        CachedTempMatch::Adapted { output_pix_fmt } => {
+            vec![pixel_format_deviation(item, output_pix_fmt)]
+        }
     }
 }
 
@@ -4375,7 +4443,7 @@ fn validation_error_may_need_remux_repair(error: &str) -> bool {
 // AI-FUNC-SUMMARY: Checks whether a validation failure means a temp output cannot be safely reused; returns true for unreadable or structurally wrong outputs; side effects: none.
 fn validation_error_indicates_unusable_temp(error: &str) -> bool {
     error.contains("has no readable video stream")
-        || error.contains("output codec is")
+        || error.contains("that was asked for")
         || error.contains("output duration is not valid")
 }
 
@@ -4572,7 +4640,7 @@ fn ensure_metadata_bsf(ffmpeg: &str, codec: TargetCodec) -> Result<(), String> {
     }
 }
 
-// AI-FUNC-SUMMARY: Performs repair av1 metadata operation; returns operation status or result; side effects: may spawn processes, move files, or write progress.
+// AI-FUNC-SUMMARY: Remuxes a temp output to rewrite AV1 colour metadata; returns success or a repair error; side effects: removes a stale repair file first, runs ffmpeg, replaces the temp, and writes progress.
 fn repair_av1_metadata(
     ffmpeg: &str,
     ffprobe: &str,
@@ -4606,6 +4674,18 @@ fn repair_av1_metadata(
         &item.chapter_policy,
         item.output_container,
     );
+    // The remux runs with `-n`, so a leftover from a stopped earlier repair
+    // would block every future repair of this temp.
+    match fs::remove_file(&repair_path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(format!(
+                "failed to remove stale repair file {}: {err}",
+                repair_path.to_string_lossy()
+            ));
+        }
+    }
     let output = process_command(ffmpeg)
         .args(&args)
         .output()
@@ -5145,7 +5225,7 @@ fn measure_plan(options: &RunOptions, quality_available: bool) -> MeasurePlan {
     }
 }
 
-// AI-FUNC-SUMMARY: Runs ffmpeg while reporting progress for the current file phase; returns exit status plus captured stderr or process-management error; side effects: starts ffmpeg and emits progress events.
+// AI-FUNC-SUMMARY: Runs ffmpeg while reporting progress for the current file phase; returns exit status plus captured stderr or process-management error; side effects: starts ffmpeg, emits one progress event per ffmpeg report block, and kills and reaps ffmpeg when progress can no longer be read.
 fn run_ffmpeg_streaming(
     ffmpeg: &str,
     args: &[String],
@@ -5162,30 +5242,50 @@ fn run_ffmpeg_streaming(
         .spawn()
         .map_err(|err| format!("failed to start ffmpeg: {err}"))?;
 
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "failed to capture ffmpeg stderr".to_string())?;
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("failed to capture ffmpeg stderr".to_string());
+    };
     let stderr_handle = thread::spawn(move || read_to_string(stderr));
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "failed to capture ffmpeg progress".to_string())?;
-    let reader = BufReader::new(stdout);
+    let Some(stdout) = child.stdout.take() else {
+        abandon_child(&mut child, stderr_handle);
+        return Err("failed to capture ffmpeg progress".to_string());
+    };
+    let mut reader = BufReader::new(stdout);
     let mut snapshot = ProgressSnapshot::default();
+    let mut line = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.map_err(|err| format!("failed reading ffmpeg progress: {err}"))?;
-        if let Some(update) = parse_progress_line(&line) {
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(err) => {
+                abandon_child(&mut child, stderr_handle);
+                return Err(format!("failed reading ffmpeg progress: {err}"));
+            }
+        }
+        let text = String::from_utf8_lossy(&line);
+        if let Some(update) = parse_progress_line(text.trim_end_matches(['\r', '\n'])) {
+            // ffmpeg writes a block of lines per report and ends each with
+            // `progress=`, so drawing once per block is enough.
+            let redraw = matches!(update, ProgressUpdate::Tick | ProgressUpdate::Done);
             snapshot.apply(update);
-            ui.render_file_progress(run, &snapshot);
+            if redraw {
+                ui.render_file_progress(run, &snapshot);
+            }
         }
     }
 
-    let status = child
-        .wait()
-        .map_err(|err| format!("failed waiting for ffmpeg: {err}"))?;
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(err) => {
+            abandon_child(&mut child, stderr_handle);
+            return Err(format!("failed waiting for ffmpeg: {err}"));
+        }
+    };
     let stderr_text = stderr_handle
         .join()
         .map_err(|_| "failed to join ffmpeg stderr reader".to_string())?
@@ -5197,22 +5297,36 @@ fn run_ffmpeg_streaming(
     })
 }
 
-// AI-FUNC-SUMMARY: Provides read to string behavior; returns the declared result; side effects: see implementation.
-fn read_to_string<R: Read>(mut reader: R) -> io::Result<String> {
-    let mut text = String::new();
-    reader.read_to_string(&mut text)?;
-    Ok(text)
+// AI-FUNC-SUMMARY: Stops an ffmpeg child the caller can no longer follow; returns nothing; side effects: kills and reaps the process and joins its stderr reader so no orphan ffmpeg keeps writing the temp file.
+fn abandon_child(child: &mut Child, stderr_handle: thread::JoinHandle<io::Result<String>>) {
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = stderr_handle.join();
 }
 
-// AI-FUNC-SUMMARY: Validates validate output conditions; returns success, failure, or test assertion result; side effects: may inspect files or emit test failures.
-fn validate_output(ffprobe: &str, path: &Path, item: &WorkItem) -> Result<(), String> {
+// AI-FUNC-SUMMARY: Reads a stream to its end as text, replacing any bytes that are not valid UTF-8; returns the text or a read error; side effects: consumes the reader.
+fn read_to_string<R: Read>(mut reader: R) -> io::Result<String> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+// AI-FUNC-SUMMARY: Validates an output against the exact source properties for the codec the run asked for; returns success or a validation error; side effects: runs ffprobe.
+fn validate_output(
+    ffprobe: &str,
+    path: &Path,
+    item: &WorkItem,
+    codec: TargetCodec,
+    check: DurationCheck,
+) -> Result<(), String> {
     validate_output_against(
         ffprobe,
         path,
         item,
         &item.video,
-        TargetCodec::Av1,
+        codec,
         &MetadataExemptions::default(),
+        check,
     )
 }
 
@@ -5223,12 +5337,21 @@ fn validate_output_for_plan(
     item: &WorkItem,
     plan: &TranscodePlan<'_>,
     target_codec: TargetCodec,
+    check: DurationCheck,
 ) -> Result<(), String> {
     let mut expected = item.video.clone();
     if let Some(pix_fmt) = plan.kind.output_pix_fmt() {
         expected.pix_fmt = Some(pix_fmt.to_string());
     }
-    validate_output_against(ffprobe, path, item, &expected, target_codec, &plan.exempt)
+    validate_output_against(
+        ffprobe,
+        path,
+        item,
+        &expected,
+        target_codec,
+        &plan.exempt,
+        check,
+    )
 }
 
 // AI-FUNC-SUMMARY: Validates probed output against expected primary-video properties and source stream layout; returns success or validation error; side effects: runs ffprobe.
@@ -5239,6 +5362,7 @@ fn validate_output_against(
     expected: &VideoInfo,
     codec: TargetCodec,
     exempt: &MetadataExemptions,
+    check: DurationCheck,
 ) -> Result<(), String> {
     let source = expected;
     let Some(info) = probe_video(ffprobe, path)? else {
@@ -5249,12 +5373,7 @@ fn validate_output_against(
     };
 
     if !info.codec_name.eq_ignore_ascii_case(codec.ffprobe_name()) {
-        return Err(format!(
-            "the converted file is {}, not the {} that was asked for: {}",
-            info.codec_name,
-            codec.ffprobe_name(),
-            path.to_string_lossy()
-        ));
+        return Err(codec_mismatch_error(&info.codec_name, codec, path));
     }
 
     if info.duration_seconds <= 0.0 {
@@ -5267,7 +5386,7 @@ fn validate_output_against(
     // Without this, a truncated encode that stopped after a few seconds passes
     // every other check, because resolution, frame rate and stream layout all
     // still match.
-    if let Some(err) = duration_validation_error(source, &info, path) {
+    if let Some(err) = duration_validation_error(source, &info, path, check) {
         return Err(err);
     }
 
@@ -5524,19 +5643,51 @@ fn rational_metadata_matches(source_value: &str, output_value: &str) -> bool {
     }
 }
 
-// AI-FUNC-SUMMARY: Compares the converted duration against the source; returns an error when the output is noticeably shorter or longer; side effects: none.
+// AI-FUNC-SUMMARY: Words the error for an output in a codec other than the one the run asked for; returns the message, which `validation_error_indicates_unusable_temp` recognizes; side effects: none.
+fn codec_mismatch_error(actual: &str, codec: TargetCodec, path: &Path) -> String {
+    format!(
+        "the converted file is {actual}, not the {} that was asked for: {}",
+        codec.ffprobe_name(),
+        path.to_string_lossy()
+    )
+}
+
+/// How much duration drift an output may show before it is rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurationCheck {
+    /// An encode this run just finished and watched to the end.
+    FreshEncode,
+    /// A temp left over from an earlier run, which may have been cut short
+    /// when that run was stopped or crashed.
+    ReusedTemp,
+}
+
+impl DurationCheck {
+    // AI-FUNC-SUMMARY: Gives the allowed duration difference for a source of the given length; returns seconds (one percent for a fresh encode, a tenth of a percent for a reused temp, never below half a second); side effects: none.
+    fn tolerance_seconds(self, source_seconds: f64) -> f64 {
+        let fraction = match self {
+            DurationCheck::FreshEncode => 0.01,
+            DurationCheck::ReusedTemp => 0.001,
+        };
+        (source_seconds * fraction).max(0.5)
+    }
+}
+
+// AI-FUNC-SUMMARY: Compares the converted duration against the source under a fresh-encode or reused-temp tolerance; returns an error when the output is noticeably shorter or longer; side effects: none.
 fn duration_validation_error(
     source: &VideoInfo,
     output: &VideoInfo,
     path: &Path,
+    check: DurationCheck,
 ) -> Option<String> {
     if source.duration_seconds <= 0.0 {
         return None;
     }
 
     // Container rounding and a trailing partial frame can move the reported
-    // duration slightly, so allow the larger of half a second and one percent.
-    let tolerance = (source.duration_seconds * 0.01).max(0.5);
+    // duration slightly. A reused temp gets far less room, because a run that
+    // was stopped part-way leaves a file that is only a little short.
+    let tolerance = check.tolerance_seconds(source.duration_seconds);
     let difference = (output.duration_seconds - source.duration_seconds).abs();
     (difference > tolerance).then(|| {
         format!(
@@ -5698,7 +5849,12 @@ fn fps_matches(source: f64, output: f64) -> bool {
     (source - output).abs() <= 0.02
 }
 
-// AI-FUNC-SUMMARY: Performs commit output operation; returns operation status or result; side effects: may spawn processes, move files, or write progress.
+// AI-FUNC-SUMMARY:
+// Purpose: Moves one validated temp output into place and retires the original under the keep-original policy.
+// Inputs: The work item, whether to keep the original as `.old`, and progress UI.
+// Returns: Success or a user-facing error naming the path that failed.
+// Side effects: Renames, copies, and deletes files; writes commit progress.
+// Notes: An output name that is the source itself (the same path, or a differently-cased name for the same file) goes through the recovery rename, never the move-then-delete path, which would delete the converted file.
 fn commit_output(item: &WorkItem, keep_original: bool, ui: &mut ProgressUi) -> Result<(), String> {
     if keep_original {
         let old_path = item
@@ -5723,7 +5879,12 @@ fn commit_output(item: &WorkItem, keep_original: bool, ui: &mut ProgressUi) -> R
         return Ok(());
     }
 
-    if item.output_path == item.input_path {
+    // Decided before anything moves: once the source is renamed aside, a
+    // differently-cased output name no longer points at it. Treating that
+    // name as a separate file would delete the converted output below.
+    let replaces_input = item.output_path == item.input_path
+        || is_same_existing_file(&item.output_path, &item.input_path);
+    if replaces_input {
         fs::rename(&item.input_path, &item.recovery_path).map_err(|err| {
             format!(
                 "failed to create recovery copy {}: {err}",
@@ -5765,7 +5926,7 @@ fn move_validated_output(source: &Path, destination: &Path) -> Result<(), String
     move_validated_output_with_progress(source, destination, |_, _| {})
 }
 
-// AI-FUNC-SUMMARY: Performs move validated output with ui operation; returns operation status or result; side effects: may spawn processes, move files, or write progress.
+// AI-FUNC-SUMMARY: Moves a validated output into place under the commit phase; returns success or the move error; side effects: renames or copies files and reports copy progress at most every 250 ms (plus the first and last update).
 fn move_validated_output_with_ui(
     source: &Path,
     destination: &Path,
@@ -5773,12 +5934,32 @@ fn move_validated_output_with_ui(
 ) -> Result<(), String> {
     ui.start_phase(Phase::Committing, 1);
     let started_at = Instant::now();
+    let mut last_report = None;
     move_validated_output_with_progress(source, destination, |copied, total| {
-        ui.render_copy_progress(copied, total, started_at);
+        if should_report_copy(&mut last_report, Instant::now(), copied, total) {
+            ui.render_copy_progress(copied, total, started_at);
+        }
     })
 }
 
-// AI-FUNC-SUMMARY: Performs move validated output with progress operation; returns operation status or result; side effects: may spawn processes, move files, or write progress.
+/// The shortest gap between two copy progress reports.
+const COPY_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+
+// AI-FUNC-SUMMARY: Decides whether one copy progress update is worth reporting; returns true for the first and the final update and otherwise at most once per interval; side effects: remembers when it last returned true.
+fn should_report_copy(last: &mut Option<Instant>, now: Instant, copied: u64, total: u64) -> bool {
+    let due = match *last {
+        None => true,
+        Some(previous) => {
+            copied >= total || now.saturating_duration_since(previous) >= COPY_PROGRESS_INTERVAL
+        }
+    };
+    if due {
+        *last = Some(now);
+    }
+    due
+}
+
+// AI-FUNC-SUMMARY: Moves a validated output to its destination, falling back to copy-then-rename through a staging file when a plain rename fails; returns success or an error naming both failures; side effects: renames or copies files, removes a partial staging file it created, and reports copy progress.
 fn move_validated_output_with_progress<F>(
     source: &Path,
     destination: &Path,
@@ -5793,6 +5974,11 @@ where
             let staging = final_commit_temp_path(destination);
             copy_file_to_new_path_with_progress(source, &staging, &mut on_progress).map_err(
                 |copy_err| {
+                    // A partial copy is ours to remove. `AlreadyExists` means
+                    // the staging name belongs to something else, so leave it.
+                    if copy_err.kind() != io::ErrorKind::AlreadyExists {
+                        let _ = fs::remove_file(&staging);
+                    }
                     format!(
                         "rename failed ({rename_err}); copy fallback to {} failed: {copy_err}",
                         staging.to_string_lossy()
@@ -5908,6 +6094,7 @@ impl ProgressSnapshot {
         match update {
             ProgressUpdate::OutTime(seconds) => self.out_time_seconds = Some(seconds),
             ProgressUpdate::Speed(speed) => self.speed = Some(speed),
+            ProgressUpdate::Tick => {}
             ProgressUpdate::Done => self.done = true,
         }
     }
@@ -5917,6 +6104,8 @@ impl ProgressSnapshot {
 enum ProgressUpdate {
     OutTime(f64),
     Speed(String),
+    /// The `progress=continue` line that closes each report block.
+    Tick,
     Done,
 }
 
@@ -5931,6 +6120,7 @@ fn parse_progress_line(line: &str) -> Option<ProgressUpdate> {
         "out_time" => parse_hms(value).map(ProgressUpdate::OutTime),
         "speed" => Some(ProgressUpdate::Speed(value.to_string())),
         "progress" if value == "end" => Some(ProgressUpdate::Done),
+        "progress" => Some(ProgressUpdate::Tick),
         _ => None,
     }
 }
@@ -7265,14 +7455,14 @@ fn progress_bar(percent: f64) -> String {
     )
 }
 
-// AI-FUNC-SUMMARY: Builds or derives estimate eta data; returns the computed value; side effects: none.
+// AI-FUNC-SUMMARY: Estimates the time left from the share done so far; returns the remaining duration, zero when the share is not a positive finite number, capped at about 136 years (`u32::MAX` seconds) so a near-zero share neither panics nor sends a front end a number it cannot hold; side effects: none.
 fn estimate_eta(percent: f64, elapsed: Duration) -> Duration {
-    if percent <= 0.0 {
+    if !percent.is_finite() || percent <= 0.0 {
         return Duration::ZERO;
     }
     let total = elapsed.as_secs_f64() / (percent / 100.0);
-    let remaining = (total - elapsed.as_secs_f64()).max(0.0);
-    Duration::from_secs_f64(remaining)
+    let remaining = (total - elapsed.as_secs_f64()).clamp(0.0, f64::from(u32::MAX));
+    Duration::try_from_secs_f64(remaining).unwrap_or(Duration::ZERO)
 }
 
 // AI-FUNC-SUMMARY: Builds or derives format duration data; returns the computed value; side effects: none.
@@ -7353,6 +7543,47 @@ fn with_added_suffix(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(format!("{file_name}{suffix}"))
 }
 
+// AI-FUNC-SUMMARY:
+// Purpose: Decides whether two paths name the very same existing file, as `clip.MP4` and `clip.mp4` do on a case-insensitive disk.
+// Inputs: The two paths to compare.
+// Returns: True only when both exist, neither is a symbolic link, and both resolve to one file.
+// Side effects: Reads file metadata.
+// Notes: On Unix the device and inode must match and the file must have exactly one link, so a hard-linked pair is never treated as one name. Elsewhere both paths must canonicalize to the same path.
+pub(crate) fn is_same_existing_file(a: &Path, b: &Path) -> bool {
+    let (Ok(meta_a), Ok(meta_b)) = (fs::symlink_metadata(a), fs::symlink_metadata(b)) else {
+        return false;
+    };
+    if meta_a.file_type().is_symlink() || meta_b.file_type().is_symlink() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta_a.dev() == meta_b.dev() && meta_a.ino() == meta_b.ino() && meta_a.nlink() == 1
+    }
+
+    #[cfg(not(unix))]
+    {
+        match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Checks whether a source file already has a conversion waiting for a decision; returns true when a review file sits beside it; side effects: reads each directory at most once, caching its pending stems in `cache`.
+fn has_pending_review(input: &Path, cache: &mut HashMap<PathBuf, HashSet<String>>) -> bool {
+    let (Some(stem), Some(parent)) = (input.file_stem().and_then(OsStr::to_str), input.parent())
+    else {
+        return false;
+    };
+    cache
+        .entry(parent.to_path_buf())
+        .or_insert_with(|| review::pending_review_stems(parent))
+        .contains(stem)
+}
+
 // AI-FUNC-SUMMARY: Checks has added suffix predicate; returns a boolean; side effects: none.
 fn has_added_suffix(path: &Path, suffix: &str) -> bool {
     path.file_name()
@@ -7394,16 +7625,29 @@ fn cached_temp_output_paths(input: &Path, tmp_dir: Option<&Path>) -> Vec<PathBuf
         .filter_map(|entry| {
             let path = entry.path();
             let name = path.file_name()?.to_str()?;
-            (prefixes
+            prefixes
                 .iter()
-                .any(|prefix| name.starts_with(prefix.as_str()))
-                && (name.ends_with(".tmp.mp4") || name.ends_with(".tmp.mkv")))
-            .then_some(path)
+                .any(|prefix| is_cached_temp_name(name, prefix))
+                .then_some(path)
         })
         .collect::<Vec<_>>();
 
     paths.sort_by_key(|path| std::cmp::Reverse(path.file_name().map(OsStr::to_os_string)));
     paths
+}
+
+// AI-FUNC-SUMMARY: Checks whether a file name is exactly `<prefix><digits>.tmp.mp4` or `.tmp.mkv`; returns true only for that shape, so `clip` never claims the temps of `clip-b` or a `.repairing` leftover; side effects: none.
+fn is_cached_temp_name(name: &str, prefix: &str) -> bool {
+    let Some(rest) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    let Some(stamp) = rest
+        .strip_suffix(".tmp.mp4")
+        .or_else(|| rest.strip_suffix(".tmp.mkv"))
+    else {
+        return false;
+    };
+    !stamp.is_empty() && stamp.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -7835,14 +8079,20 @@ target_folder: "\\\\server\\share\\videos"
         let newer = tmp.join(".myvidcomp-clip-200.tmp.mp4");
         let other = tmp.join(".myvidcomp-other-300.tmp.mp4");
         let repair = tmp.join(".myvidcomp-clip-200.tmp.mp4.repairing.mp4");
-        fs::write(&older, b"older").unwrap();
-        fs::write(&newer, b"newer").unwrap();
-        fs::write(&other, b"other").unwrap();
-        fs::write(&repair, b"repair").unwrap();
+        // `clip-b.mkv` shares the `clip-` prefix but is a different source.
+        let sibling = tmp.join(".myvidcomp-clip-b-400.tmp.mp4");
+        let commit = tmp.join(".myvidcomp-commit-clip-500.tmp.mp4");
+        let legacy = tmp.join(".pvac-clip-50.tmp.mkv");
+        let no_stamp = tmp.join(".myvidcomp-clip-.tmp.mp4");
+        for path in [
+            &older, &newer, &other, &repair, &sibling, &commit, &legacy, &no_stamp,
+        ] {
+            fs::write(path, b"x").unwrap();
+        }
 
         let cached = cached_temp_output_paths(&input, Some(&tmp));
 
-        assert_eq!(cached, vec![newer, older]);
+        assert_eq!(cached, vec![legacy, newer, older]);
         remove_temp_dir(root);
     }
 
@@ -7872,6 +8122,46 @@ target_folder: "\\\\server\\share\\videos"
 
         assert!(!source.exists());
         assert_eq!(fs::read(&destination).unwrap(), b"converted");
+
+        remove_temp_dir(root);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that copy progress is reported first, last, and at most once per interval between; returns test assertion result; side effects: none.
+    fn copy_progress_is_throttled_by_time() {
+        let start = Instant::now();
+        let mut last = None;
+        let at = |millis| start + Duration::from_millis(millis);
+
+        assert!(should_report_copy(&mut last, at(0), 0, 100));
+        assert!(!should_report_copy(&mut last, at(100), 10, 100));
+        assert!(!should_report_copy(&mut last, at(249), 20, 100));
+        assert!(should_report_copy(&mut last, at(250), 30, 100));
+        assert!(!should_report_copy(&mut last, at(300), 40, 100));
+        assert!(should_report_copy(&mut last, at(301), 100, 100));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that a failed copy fallback leaves no staging file behind; returns test assertion result; side effects: creates and removes temporary files.
+    fn failed_copy_fallback_leaves_no_staging_file() {
+        let root = make_temp_dir("move-copy-fails");
+        // A directory source cannot be renamed onto a non-empty directory and
+        // cannot be read as a file, so both the rename and the copy fail.
+        let source = root.join("source-dir");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("inner"), b"x").unwrap();
+        let destination = root.join("clip.mp4");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("inner"), b"x").unwrap();
+
+        assert!(move_validated_output(&source, &destination).is_err());
+
+        let leftovers = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("commit-"))
+            .count();
+        assert_eq!(leftovers, 0);
 
         remove_temp_dir(root);
     }
@@ -7933,18 +8223,11 @@ target_folder: "\\\\server\\share\\videos"
             parse_progress_line("progress=end"),
             Some(ProgressUpdate::Done)
         );
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Validates progress UI observes quit-prompt ownership flag; returns test assertion result; side effects: none.
-    fn progress_ui_observes_prompt_active_flag() {
-        let prompt_active = Arc::new(AtomicBool::new(false));
-        let mut events = NoopEventSink;
-        let ui = ProgressUi::new(None, Arc::clone(&prompt_active), &mut events, false);
-
-        assert!(!ui.prompt_active());
-        prompt_active.store(true, Ordering::Relaxed);
-        assert!(ui.prompt_active());
+        assert_eq!(
+            parse_progress_line("progress=continue"),
+            Some(ProgressUpdate::Tick)
+        );
+        assert_eq!(parse_progress_line("frame=42"), None);
     }
 
     #[test]
@@ -7960,131 +8243,110 @@ target_folder: "\\\\server\\share\\videos"
     }
 
     #[test]
-    // AI-FUNC-SUMMARY: Validates closure event sinks receive structured events; returns test assertion result; side effects: mutates a local vector.
-    fn closure_event_sink_receives_events() {
-        let mut events = Vec::new();
-        let mut sink = |event| events.push(event);
+    // AI-FUNC-SUMMARY: Verifies the exact FFI JSON of each event family a front end reads, including escaping, optional fields and fixed decimals; returns test assertion result; side effects: none.
+    fn serializes_events_as_json() {
+        let cases = [
+            (
+                Event::Log {
+                    level: LogLevel::Warning,
+                    message: "quote \" slash \\ newline\n".to_string(),
+                },
+                "{\"type\":\"log\",\"level\":\"warning\",\"message\":\"quote \\\" slash \\\\ newline\\n\"}",
+            ),
+            (
+                Event::FileProgress {
+                    index: 2,
+                    percent: 41.25,
+                    phase: "encoding".to_string(),
+                    phase_percent: 68.5,
+                    speed: Some("1.8x".to_string()),
+                    eta_seconds: 320,
+                },
+                "{\"type\":\"file_progress\",\"index\":2,\"percent\":41.250,\"phase\":\"encoding\",\"phase_percent\":68.500,\"speed\":\"1.8x\",\"eta_seconds\":320}",
+            ),
+            (
+                Event::PhaseStarted {
+                    index: 2,
+                    phase: "measuring".to_string(),
+                    step: 1,
+                    steps: 2,
+                },
+                "{\"type\":\"phase\",\"index\":2,\"phase\":\"measuring\",\"step\":1,\"steps\":2}",
+            ),
+            (
+                Event::RunProgress {
+                    processed: 7,
+                    total: 50,
+                    percent: 14.0,
+                    eta_seconds: 5400,
+                },
+                "{\"type\":\"run_progress\",\"processed\":7,\"total\":50,\"percent\":14.000,\"eta_seconds\":5400}",
+            ),
+            (
+                Event::SettingsSelected {
+                    codec: TargetCodec::Hevc,
+                    preservation: Preservation::Flexible,
+                    encoder_preference: EncoderPreference::Gpu,
+                    output_format: OutputFormat::MkvFallback,
+                    quality_mode: QualityMode::Search,
+                    quality_check: QualityCheck::Sampled,
+                    quality_target: 9500,
+                    review_threshold: 9300,
+                },
+                "{\"type\":\"settings_selected\",\"codec\":\"hevc\",\"preservation\":\"flexible\",\"encoder_preference\":\"gpu\",\"output_format\":\"mkv-fallback\",\"quality_mode\":\"search\",\"quality_check\":\"sampled\",\"quality_target\":9500,\"review_threshold\":9300}",
+            ),
+            (
+                Event::QualityMeasured {
+                    index: 2,
+                    score: 9412,
+                    subsample: 5,
+                    target: 9500,
+                    passed: true,
+                    caveat: None,
+                },
+                "{\"type\":\"quality_measured\",\"index\":2,\"score\":9412,\"subsample\":5,\"target\":9500,\"passed\":true,\"caveat\":null}",
+            ),
+            (
+                Event::QualitySearch {
+                    index: 1,
+                    iteration: 3,
+                    encoder: "libsvtav1".to_string(),
+                    quality: "crf=30".to_string(),
+                    score: Some(9550),
+                },
+                "{\"type\":\"quality_search\",\"index\":1,\"iteration\":3,\"encoder\":\"libsvtav1\",\"quality\":\"crf=30\",\"score\":9550}",
+            ),
+            (
+                Event::FileAttempt {
+                    index: 2,
+                    attempt: 3,
+                    total_attempts: 5,
+                    encoder: "av1_nvenc".to_string(),
+                    quality: "crf=24".to_string(),
+                    plan: "adapted".to_string(),
+                    target_pix_fmt: Some("yuv420p10le".to_string()),
+                    fallback_reason: Some("unsupported pixel format".to_string()),
+                },
+                "{\"type\":\"file_attempt\",\"index\":2,\"attempt\":3,\"total_attempts\":5,\"encoder\":\"av1_nvenc\",\"quality\":\"crf=24\",\"plan\":\"adapted\",\"target_pix_fmt\":\"yuv420p10le\",\"fallback_reason\":\"unsupported pixel format\"}",
+            ),
+        ];
 
-        EventSink::on_event(&mut sink, Event::StopRequested);
-
-        assert_eq!(events, vec![Event::StopRequested]);
+        for (event, expected) in cases {
+            assert_eq!(event_json(&event), expected);
+        }
     }
 
     #[test]
-    // AI-FUNC-SUMMARY: Validates FFI event JSON escaping; returns test assertion result; side effects: none.
-    fn serializes_events_as_json_for_ffi() {
-        let event = Event::Log {
-            level: LogLevel::Warning,
-            message: "quote \" slash \\ newline\n".to_string(),
-        };
-
-        assert_eq!(
-            event_json(&event),
-            "{\"type\":\"log\",\"level\":\"warning\",\"message\":\"quote \\\" slash \\\\ newline\\n\"}"
-        );
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Verifies the progress events carry the phase and the run totals a front end draws two bars from; returns test assertion result; side effects: none.
-    fn serializes_progress_events_as_json() {
-        assert_eq!(
-            event_json(&Event::FileProgress {
-                index: 2,
-                percent: 41.25,
-                phase: "encoding".to_string(),
-                phase_percent: 68.5,
-                speed: Some("1.8x".to_string()),
-                eta_seconds: 320,
-            }),
-            "{\"type\":\"file_progress\",\"index\":2,\"percent\":41.250,\"phase\":\"encoding\",\"phase_percent\":68.500,\"speed\":\"1.8x\",\"eta_seconds\":320}"
-        );
-        assert_eq!(
-            event_json(&Event::PhaseStarted {
-                index: 2,
-                phase: "measuring".to_string(),
-                step: 1,
-                steps: 2,
-            }),
-            "{\"type\":\"phase\",\"index\":2,\"phase\":\"measuring\",\"step\":1,\"steps\":2}"
-        );
-        assert_eq!(
-            event_json(&Event::RunProgress {
-                processed: 7,
-                total: 50,
-                percent: 14.0,
-                eta_seconds: 5400,
-            }),
-            "{\"type\":\"run_progress\",\"processed\":7,\"total\":50,\"percent\":14.000,\"eta_seconds\":5400}"
-        );
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Verifies the settings event carries every option a front end shows; returns test assertion result; side effects: none.
-    fn serializes_settings_event_as_json() {
-        let event = Event::SettingsSelected {
-            codec: TargetCodec::Hevc,
-            preservation: Preservation::Flexible,
-            encoder_preference: EncoderPreference::Gpu,
-            output_format: OutputFormat::MkvFallback,
-            quality_mode: QualityMode::Search,
-            quality_check: QualityCheck::Sampled,
-            quality_target: 9500,
-            review_threshold: 9300,
-        };
-
-        assert_eq!(
-            event_json(&event),
-            "{\"type\":\"settings_selected\",\"codec\":\"hevc\",\"preservation\":\"flexible\",\"encoder_preference\":\"gpu\",\"output_format\":\"mkv-fallback\",\"quality_mode\":\"search\",\"quality_check\":\"sampled\",\"quality_target\":9500,\"review_threshold\":9300}"
-        );
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Verifies the quality events serialize with their optional fields; returns test assertion result; side effects: none.
-    fn serializes_quality_events_as_json() {
-        let measured = Event::QualityMeasured {
-            index: 2,
-            score: 9412,
-            subsample: 5,
-            target: 9500,
-            passed: true,
-            caveat: None,
-        };
-        assert_eq!(
-            event_json(&measured),
-            "{\"type\":\"quality_measured\",\"index\":2,\"score\":9412,\"subsample\":5,\"target\":9500,\"passed\":true,\"caveat\":null}"
-        );
-
-        let search = Event::QualitySearch {
-            index: 1,
-            iteration: 3,
-            encoder: "libsvtav1".to_string(),
-            quality: "crf=30".to_string(),
-            score: Some(9550),
-        };
-        assert_eq!(
-            event_json(&search),
-            "{\"type\":\"quality_search\",\"index\":1,\"iteration\":3,\"encoder\":\"libsvtav1\",\"quality\":\"crf=30\",\"score\":9550}"
-        );
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Validates adapted file-attempt event JSON serialization; returns test assertion result; side effects: none.
-    fn serializes_adapted_file_attempt_event_as_json() {
-        let event = Event::FileAttempt {
-            index: 2,
-            attempt: 3,
-            total_attempts: 5,
-            encoder: "av1_nvenc".to_string(),
-            quality: "crf=24".to_string(),
-            plan: "adapted".to_string(),
-            target_pix_fmt: Some("yuv420p10le".to_string()),
-            fallback_reason: Some("unsupported pixel format".to_string()),
-        };
-
-        assert_eq!(
-            event_json(&event),
-            "{\"type\":\"file_attempt\",\"index\":2,\"attempt\":3,\"total_attempts\":5,\"encoder\":\"av1_nvenc\",\"quality\":\"crf=24\",\"plan\":\"adapted\",\"target_pix_fmt\":\"yuv420p10le\",\"fallback_reason\":\"unsupported pixel format\"}"
-        );
+    // AI-FUNC-SUMMARY: Verifies that the time-left estimate never panics on odd shares and stays within its cap; returns test assertion result; side effects: none.
+    fn estimate_eta_handles_degenerate_shares() {
+        let elapsed = Duration::from_secs(60);
+        assert_eq!(estimate_eta(50.0, elapsed), Duration::from_secs(60));
+        let cap = Duration::from_secs(u64::from(u32::MAX));
+        for percent in [0.0, -5.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(estimate_eta(percent, elapsed), Duration::ZERO, "{percent}");
+        }
+        assert_eq!(estimate_eta(f64::MIN_POSITIVE, elapsed), cap);
+        assert_eq!(estimate_eta(150.0, elapsed), Duration::ZERO);
     }
 
     #[test]
@@ -8106,93 +8368,48 @@ target_folder: "\\\\server\\share\\videos"
     }
 
     #[test]
-    // AI-FUNC-SUMMARY: Provides prefers vulkan before cpu fallback behavior; returns the declared result; side effects: see implementation.
-    fn prefers_vulkan_before_cpu_fallback() {
-        let encoders = r#"
- V..... av1_vulkan
- V..... libsvtav1
- V..... libaom-av1
-"#;
+    // AI-FUNC-SUMMARY: Verifies which AV1 encoder automatic selection prefers for each listing (vendor hardware, then Media Foundation, then Vulkan, then software); returns test assertion result; side effects: none.
+    fn automatic_selection_prefers_encoders_in_order() {
+        let cases = [
+            (
+                &["av1_vulkan", "libsvtav1", "libaom-av1"][..],
+                "av1_vulkan",
+                EncoderKind::Vulkan,
+            ),
+            (
+                &["av1_vulkan", "av1_mf", "libsvtav1"][..],
+                "av1_mf",
+                EncoderKind::Hardware,
+            ),
+            (
+                &["av1_nvenc", "av1_vulkan", "libsvtav1"][..],
+                "av1_nvenc",
+                EncoderKind::Hardware,
+            ),
+            (
+                &["av1_qsv", "av1_nvenc", "libsvtav1"][..],
+                "av1_nvenc",
+                EncoderKind::Hardware,
+            ),
+            (
+                &["av1_nvenc", "av1_vulkan", "libsvtav1", "libaom-av1"][..],
+                "av1_nvenc",
+                EncoderKind::Hardware,
+            ),
+            (&["av1_qsv", "av1_mf"][..], "av1_qsv", EncoderKind::Hardware),
+        ];
 
-        let encoder = detect_encoder_from_listing(encoders).unwrap();
+        for (names, expected_name, expected_kind) in cases {
+            let listing = names
+                .iter()
+                .map(|name| format!(" V..... {name}\n"))
+                .collect::<String>();
 
-        assert_eq!(encoder.name, "av1_vulkan");
-        assert_eq!(encoder.kind, EncoderKind::Vulkan);
-    }
+            let encoder = detect_encoder_from_listing(&listing).unwrap();
 
-    #[test]
-    // AI-FUNC-SUMMARY: Validates Media Foundation AV1 is preferred before Vulkan fallback; returns test assertion result; side effects: none.
-    fn prefers_media_foundation_before_vulkan() {
-        let encoders = r#"
- V..... av1_vulkan
- V..... av1_mf
- V..... libsvtav1
-"#;
-
-        let encoder = detect_encoder_from_listing(encoders).unwrap();
-
-        assert_eq!(encoder.name, "av1_mf");
-        assert_eq!(encoder.kind, EncoderKind::Hardware);
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Provides prefers vendor hardware before vulkan behavior; returns the declared result; side effects: see implementation.
-    fn prefers_vendor_hardware_before_vulkan() {
-        let encoders = r#"
- V..... av1_nvenc
- V..... av1_vulkan
- V..... libsvtav1
-"#;
-
-        let encoder = detect_encoder_from_listing(encoders).unwrap();
-
-        assert_eq!(encoder.name, "av1_nvenc");
-        assert_eq!(encoder.kind, EncoderKind::Hardware);
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Provides prefers nvenc before qsv behavior; returns the declared result; side effects: see implementation.
-    fn prefers_nvenc_before_qsv() {
-        let encoders = r#"
- V..... av1_qsv
- V..... av1_nvenc
- V..... libsvtav1
-"#;
-
-        let encoder = detect_encoder_from_listing(encoders).unwrap();
-
-        assert_eq!(encoder.name, "av1_nvenc");
-        assert_eq!(encoder.kind, EncoderKind::Hardware);
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Validates automatic exact selection prefers hardware before software; returns test assertion result; side effects: none.
-    fn automatic_exact_selection_prefers_hardware_before_software() {
-        let encoders = r#"
- V..... av1_nvenc
- V..... av1_vulkan
- V..... libsvtav1
- V..... libaom-av1
-"#;
-
-        let encoder = detect_encoder_from_listing(encoders).unwrap();
-
-        assert_eq!(encoder.name, "av1_nvenc");
-        assert_eq!(encoder.kind, EncoderKind::Hardware);
-    }
-
-    #[test]
-    // AI-FUNC-SUMMARY: Validates automatic exact selection retains hardware candidates without software; returns test assertion result; side effects: none.
-    fn automatic_exact_selection_supports_hardware_only_listing() {
-        let encoders = r#"
- V..... av1_qsv
- V..... av1_mf
-"#;
-
-        let encoder = detect_encoder_from_listing(encoders).unwrap();
-
-        assert_eq!(encoder.name, "av1_qsv");
-        assert_eq!(encoder.kind, EncoderKind::Hardware);
+            assert_eq!(encoder.name, expected_name, "{names:?}");
+            assert_eq!(encoder.kind, expected_kind, "{names:?}");
+        }
     }
 
     #[test]
@@ -9023,16 +9240,214 @@ duration=60.0
         assert!(validation_error_indicates_unusable_temp(
             "output has no readable video stream: .myvidcomp-clip.tmp.mp4"
         ));
+        // The real messages, not copies of the markers, so a reworded message
+        // cannot silently stop a wrong-codec temp from being cleaned up.
         assert!(validation_error_indicates_unusable_temp(
-            "output codec is h264, expected av1"
+            &codec_mismatch_error("h264", TargetCodec::Hevc, Path::new("clip.mp4"))
         ));
         assert!(!validation_error_indicates_unusable_temp(
             "output sample aspect ratio changed"
         ));
+        let mut short = sample_video("av1", None);
+        short.duration_seconds = 60.0;
+        let duration_err = duration_validation_error(
+            &sample_video("h264", None),
+            &short,
+            Path::new("clip.mp4"),
+            DurationCheck::ReusedTemp,
+        )
+        .unwrap();
+        assert!(!validation_error_indicates_unusable_temp(&duration_err));
         assert!(is_temp_output_path(Path::new(
             ".myvidcomp-clip-123.tmp.mp4"
         )));
         assert!(!is_temp_output_path(Path::new("clip.mp4")));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that a reused temp gets a far tighter duration tolerance than a fresh encode; returns test assertion result; side effects: none.
+    fn duration_tolerance_depends_on_where_the_output_came_from() {
+        let cases = [
+            // (source seconds, output seconds, check, accepted)
+            (120.0, 121.1, DurationCheck::FreshEncode, true),
+            (120.0, 118.7, DurationCheck::FreshEncode, false),
+            (120.0, 120.4, DurationCheck::ReusedTemp, true),
+            (120.0, 119.3, DurationCheck::ReusedTemp, false),
+            (3600.0, 3570.0, DurationCheck::FreshEncode, true),
+            (3600.0, 3590.0, DurationCheck::ReusedTemp, false),
+            (3600.0, 3597.0, DurationCheck::ReusedTemp, true),
+        ];
+        for (source_seconds, output_seconds, check, accepted) in cases {
+            let mut source = sample_video("h264", None);
+            source.duration_seconds = source_seconds;
+            let mut output = sample_video("av1", None);
+            output.duration_seconds = output_seconds;
+
+            let error = duration_validation_error(&source, &output, Path::new("clip.mp4"), check);
+
+            assert_eq!(
+                error.is_none(),
+                accepted,
+                "{source_seconds}s -> {output_seconds}s under {check:?}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that an adapted cached temp carries the same pixel-format difference a fresh adapted encode reports, and an exact one carries none; returns test assertion result; side effects: none.
+    fn cached_temp_reports_its_pixel_format_change() {
+        let mut video = sample_video("h264", None);
+        video.pix_fmt = Some("yuv422p".to_string());
+        let item = plan_test_item(&video);
+
+        assert!(cached_temp_deviations(CachedTempMatch::Exact, &item).is_empty());
+        let adapted = cached_temp_deviations(
+            CachedTempMatch::Adapted {
+                output_pix_fmt: "yuv420p",
+            },
+            &item,
+        );
+        assert_eq!(adapted, vec![pixel_format_deviation(&item, "yuv420p")]);
+        assert_eq!(adapted[0].0, "pixel_format");
+        assert!(adapted[0].1.contains("yuv422p") && adapted[0].1.contains("yuv420p"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that the pending-review check reads each directory once and answers per source stem; returns test assertion result; side effects: creates and removes temporary files.
+    fn pending_review_check_reads_each_directory_once() {
+        let root = make_temp_dir("pending-cache");
+        fs::write(root.join("clip.myvidcomp-review.mp4"), b"x").unwrap();
+        let mut cache = HashMap::new();
+
+        assert!(has_pending_review(&root.join("clip.mkv"), &mut cache));
+        assert!(!has_pending_review(&root.join("clip-b.mkv"), &mut cache));
+        // Written after the first read, so only a second read would see it.
+        fs::write(root.join("other.myvidcomp-review.mp4"), b"x").unwrap();
+        assert!(!has_pending_review(&root.join("other.mkv"), &mut cache));
+        assert_eq!(cache.len(), 1);
+
+        remove_temp_dir(root);
+    }
+
+    // AI-FUNC-SUMMARY: Probes whether a directory's file system ignores letter case; returns true when `case-probe.TXT` is also reachable as `case-probe.txt`; side effects: creates and removes one file.
+    fn file_system_ignores_case(dir: &Path) -> bool {
+        let probe = dir.join("case-probe.TXT");
+        fs::write(&probe, b"x").unwrap();
+        let ignores = dir.join("case-probe.txt").exists();
+        fs::remove_file(&probe).unwrap();
+        ignores
+    }
+
+    // AI-FUNC-SUMMARY: Builds the work item for an upper-case `clip.MP4` source under one keep-original setting; returns the item or its skip reason; side effects: reads path state.
+    fn uppercase_mp4_item(input: &Path, keep_original: bool) -> Result<WorkItem, SkipReason> {
+        WorkItem::new(
+            input.to_path_buf(),
+            sample_video("h264", Some(8_000_000)),
+            vec![sample_stream(0, "video", "h264")],
+            Vec::new(),
+            ItemPolicy {
+                keep_original,
+                tmp_dir: None,
+                output_format: OutputFormat::Mp4,
+                target_codec: TargetCodec::Av1,
+                preservation: Preservation::Strict,
+            },
+        )
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies same-file identity for equal, different, missing, differently-cased, linked and hard-linked paths; returns test assertion result; side effects: creates and removes temporary files.
+    fn same_existing_file_identity() {
+        let root = make_temp_dir("same-file");
+        let a = root.join("a.bin");
+        let b = root.join("b.bin");
+        let missing = root.join("missing.bin");
+        fs::write(&a, b"a").unwrap();
+        fs::write(&b, b"b").unwrap();
+
+        assert!(is_same_existing_file(&a, &a));
+        assert!(!is_same_existing_file(&a, &b));
+        assert!(!is_same_existing_file(&a, &missing));
+        assert!(!is_same_existing_file(&missing, &missing));
+
+        let upper = root.join("clip.MP4");
+        fs::write(&upper, b"v").unwrap();
+        assert_eq!(
+            is_same_existing_file(&upper, &root.join("clip.mp4")),
+            file_system_ignores_case(&root)
+        );
+
+        #[cfg(unix)]
+        {
+            let link = root.join("link.bin");
+            std::os::unix::fs::symlink(&a, &link).unwrap();
+            assert!(!is_same_existing_file(&a, &link));
+            let hard = root.join("hard.bin");
+            fs::hard_link(&a, &hard).unwrap();
+            assert!(!is_same_existing_file(&a, &hard));
+        }
+
+        remove_temp_dir(root);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that an upper-case `.MP4` source is not its own conflict, while a genuinely separate `clip.mp4` still is; returns test assertion result; side effects: creates and removes temporary files.
+    fn uppercase_mp4_source_is_not_its_own_conflict() {
+        for keep_original in [false, true] {
+            let root = make_temp_dir("upper-ext");
+            let input = root.join("clip.MP4");
+            fs::write(&input, b"original").unwrap();
+
+            let item = uppercase_mp4_item(&input, keep_original)
+                .unwrap_or_else(|reason| panic!("keep={keep_original}: {reason:?}"));
+            assert_eq!(item.output_path, root.join("clip.mp4"));
+
+            if !file_system_ignores_case(&root) {
+                fs::write(root.join("clip.mp4"), b"another file").unwrap();
+                assert!(matches!(
+                    uppercase_mp4_item(&input, keep_original),
+                    Err(SkipReason::Conflict)
+                ));
+            }
+
+            remove_temp_dir(root);
+        }
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that committing over an upper-case `.MP4` source leaves exactly the converted file (plus `.old` when kept) on any file system; returns test assertion result; side effects: creates, renames and removes temporary files.
+    fn commit_output_over_uppercase_mp4_keeps_the_converted_file() {
+        for keep_original in [false, true] {
+            let root = make_temp_dir("upper-commit");
+            let input = root.join("clip.MP4");
+            fs::write(&input, b"original").unwrap();
+            let item = uppercase_mp4_item(&input, keep_original)
+                .unwrap_or_else(|reason| panic!("keep={keep_original}: {reason:?}"));
+            fs::write(&item.temp_path, b"converted").unwrap();
+
+            let mut events = NoopEventSink;
+            let mut ui =
+                ProgressUi::new(None, Arc::new(AtomicBool::new(false)), &mut events, false);
+            commit_output(&item, keep_original, &mut ui).unwrap();
+
+            let mut names = fs::read_dir(&root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            names.sort();
+            let expected: Vec<&str> = if keep_original {
+                vec!["clip.MP4.old", "clip.mp4"]
+            } else {
+                vec!["clip.mp4"]
+            };
+            assert_eq!(names, expected, "keep={keep_original}");
+            assert_eq!(fs::read(root.join("clip.mp4")).unwrap(), b"converted");
+            if keep_original {
+                assert_eq!(fs::read(root.join("clip.MP4.old")).unwrap(), b"original");
+            }
+
+            remove_temp_dir(root);
+        }
     }
 
     #[test]

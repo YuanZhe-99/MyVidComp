@@ -14,7 +14,9 @@
 | `myvidcomp_run_blocking_v1` | function | 为 FFI 调用方运行一整趟转换，并通过 JSON 回调报告进度。 |
 | `myvidcomp_review_list` | function | 列出某个文件夹中等待“留哪一份”决定的转换，返回分配好的 JSON 文本。 |
 | `myvidcomp_review_resolve` | function | 对一项待复核内容执行留新、留原或两份都留的决定，成功时返回 null，否则返回分配好的错误字符串。 |
-| `run_ffi_blocking` | function | 为 FFI 调用方运行共用的工作流程，返回 null 或分配好的错误字符串。 |
+| `run_ffi_blocking` | function | 为 FFI 调用方运行共用的工作流程，返回 null 或分配好的错误字符串；引擎中的 panic 以错误返回，而不会让宿主程序中止。 |
+| `guard_ffi` | function | 运行一段 FFI 主体，使 panic 变为普通错误，返回主体的值或由 panic 信息构造的错误；用于运行、复核列表和复核决定三个导出函数。 |
+| `panic_message` | function | 从 panic 负载中读出文字，返回该信息，负载不是文字时返回固定短语。 |
 | `run_options_from_ffi_v1` | function | 把带版本的 FFI 运行选项转换为安全的 Rust 运行选项，返回选项或一条校验错误。 |
 | `ffi_choice` | function | 读取一个可选的枚举值 C 字符串并归一化，返回解析出的值或该类型的默认值。 |
 | `ffi_isize` | function | 把 FFI 传入的计数转换为平台整数，返回该计数或一条范围错误。 |

@@ -10,8 +10,10 @@
 //! `myvidcomp_run_blocking_v2` beside the existing pair, never growing
 //! `FfiRunOptionsV1` in place.
 
+use std::any::Any;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::ptr;
 
@@ -208,7 +210,10 @@ pub unsafe extern "C" fn myvidcomp_review_list(folder: *const c_char) -> *mut c_
         Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
     };
 
-    ffi_string_ptr(review_list_json(&list_reviews(&folder)))
+    ffi_string_ptr(guard_ffi(
+        || review_list_json(&list_reviews(&folder)),
+        |panic| format!("{{\"error\":{}}}", json_escape(&panic)),
+    ))
 }
 
 #[unsafe(no_mangle)]
@@ -227,13 +232,13 @@ pub unsafe extern "C" fn myvidcomp_review_resolve(
         Err(err) => return ffi_string_ptr(err),
     };
 
-    match resolve_review(&sidecar, &decision) {
+    match guard_ffi(|| resolve_review(&sidecar, &decision), Err) {
         Ok(()) => ptr::null_mut(),
         Err(err) => ffi_string_ptr(err),
     }
 }
 
-// AI-FUNC-SUMMARY: Runs the shared workflow for an FFI caller; returns null or an allocated error string; side effects: performs the whole conversion run and invokes the callback.
+// AI-FUNC-SUMMARY: Runs the shared workflow for an FFI caller; returns null or an allocated error string; side effects: performs the whole conversion run and invokes the callback; a panic in the engine comes back as an error instead of aborting the host.
 fn run_ffi_blocking(
     options: RunOptions,
     callback: Option<FfiEventCallback>,
@@ -250,9 +255,36 @@ fn run_ffi_blocking(
         user_data,
     };
 
-    match run_with_events(options, &mut events, cancellation) {
+    match guard_ffi(|| run_with_events(options, &mut events, cancellation), Err) {
         Ok(_) => ptr::null_mut(),
         Err(err) => ffi_string_ptr(err),
+    }
+}
+
+// AI-FUNC-SUMMARY:
+// Purpose: Runs one FFI body so that a panic becomes an ordinary error instead of aborting the host application.
+// Inputs: The body, and how to turn a panic message into the body's return type.
+// Returns: The body's value, or `on_panic` applied to the panic message.
+// Side effects: None beyond the body's own.
+// Notes: Rust aborts the whole process when a panic reaches an `extern "C"` boundary, which would close the application mid-run.
+fn guard_ffi<T>(body: impl FnOnce() -> T, on_panic: impl FnOnce(String) -> T) -> T {
+    match panic::catch_unwind(AssertUnwindSafe(body)) {
+        Ok(value) => value,
+        Err(payload) => on_panic(format!(
+            "internal error: {}",
+            panic_message(payload.as_ref())
+        )),
+    }
+}
+
+// AI-FUNC-SUMMARY: Reads the text out of a panic payload; returns the message, or a fixed phrase when the payload is not text; side effects: none.
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "unexpected failure".to_string()
     }
 }
 
@@ -462,6 +494,16 @@ fn json_escape(value: &str) -> String {
 mod tests {
     use super::*;
     use std::ffi::CString;
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that a panic inside an FFI body comes back as an error value instead of unwinding; returns test assertion result; side effects: prints the panic message to stderr.
+    fn guard_ffi_turns_a_panic_into_an_error() {
+        assert_eq!(guard_ffi(|| 7, |_| 0), 7);
+        let caught: Result<(), String> = guard_ffi(|| panic!("boom {}", 42), Err);
+        assert_eq!(caught, Err("internal error: boom 42".to_string()));
+        let caught: Result<(), String> = guard_ffi(|| panic!("static"), Err);
+        assert_eq!(caught, Err("internal error: static".to_string()));
+    }
 
     // AI-FUNC-SUMMARY: Builds a zeroed options struct for tests; returns the struct with only the folder set; side effects: none.
     fn base_options(folder: &CString) -> FfiRunOptionsV1 {

@@ -40,15 +40,17 @@ readers in [../architecture.md](../architecture.md).
 | `run_workflow` | function | Executes the shared MyVidComp workflow for both terminal CLI and embedded callers.. |
 | `validate_run_options` | function | Validates embedded run options before workflow side effects, returning success or a user-facing error. |
 | `move_validated_output` | function | Performs move validated output operation, returning operation status or result. |
-| `move_validated_output_with_ui` | function | Performs move validated output with ui operation, returning operation status or result. |
-| `move_validated_output_with_progress` | function | Performs move validated output with progress operation, returning operation status or result. |
+| `move_validated_output_with_ui` | function | Moves a validated output into place under the commit phase, returning success or the move error; reports copy progress at most every 250 ms plus the first and last update. |
+| `should_report_copy` | function | Decides whether one copy progress update is worth reporting, returning true for the first and final update and otherwise at most once per interval. |
+| `move_validated_output_with_progress` | function | Moves a validated output to its destination, falling back to copy-then-rename through a staging file, returning success or an error naming both failures; removes a partial staging file it created. |
 | `copy_file_to_new_path` | function | Performs copy file to new path operation, returning operation status or result. |
 | `copy_file_to_new_path_with_progress` | function | Performs copy file to new path with progress operation, returning operation status or result. |
 | `final_commit_temp_path` | function | Provides final commit temp path behavior, returning the declared result. |
 | `metadata_repair_temp_path` | function | Provides metadata repair temp path behavior, returning the declared result. |
 | `metadata_backup_temp_path` | function | Provides metadata backup temp path behavior, returning the declared result. |
 | `apply` | function | Provides apply behavior, returning the declared result. |
-| `parse_progress_line` | function | Parses progress line input, returning parsed values or errors. |
+| `parse_progress_line` | function | Parses one ffmpeg progress line, returning the update it carries, including the `progress=` line that closes each report block. |
+| `has_pending_review` | function | Checks whether a source file already has a conversion waiting for a decision, returning true when a review file sits beside it; reads each directory at most once per scan. |
 | `parse_hms` | function | Parses hms input, returning parsed values or errors. |
 | `start` | function | Starts the optional stdin listener for graceful shutdown requests.. |
 | `prompt_active_flag` | function | Clones the prompt-active flag for progress rendering coordination, returning shared flag handle. |

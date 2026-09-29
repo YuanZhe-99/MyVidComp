@@ -269,6 +269,26 @@ class AppSettings {
 }
 
 /// Reads and writes the settings file in the user's profile.
+// AI-FUNC-SUMMARY: Replaces a file's contents all at once by writing a temporary file beside it and renaming it into place; returns when the new contents are in place; side effects: writes and renames a file, and removes the temporary file if anything fails, so a crash mid-write never leaves a half-written file.
+Future<void> writeAtomically(File file, String contents) async {
+  final temporary = File(
+    '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+  );
+  try {
+    await temporary.writeAsString(contents, flush: true);
+    await temporary.rename(file.path);
+  } catch (_) {
+    try {
+      if (await temporary.exists()) {
+        await temporary.delete();
+      }
+    } on FileSystemException {
+      // The original error is the one worth reporting.
+    }
+    rethrow;
+  }
+}
+
 class SettingsStore {
   const SettingsStore();
 
@@ -313,7 +333,8 @@ class SettingsStore {
   Future<void> save(AppSettings settings) async {
     final file = _settingsFile();
     await file.parent.create(recursive: true);
-    await file.writeAsString(
+    await writeAtomically(
+      file,
       '${const JsonEncoder.withIndent('  ').convert(settings.toJson())}\n',
     );
   }

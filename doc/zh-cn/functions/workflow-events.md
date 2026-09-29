@@ -40,15 +40,17 @@
 | `run_workflow` | function | 为终端命令行和嵌入调用方执行共用的 MyVidComp 工作流程。 |
 | `validate_run_options` | function | 在工作流程产生副作用之前校验嵌入运行选项，返回成功或一条面向用户的错误。 |
 | `move_validated_output` | function | 执行移动已校验输出的操作，返回操作状态或结果。 |
-| `move_validated_output_with_ui` | function | 执行带界面反馈的移动已校验输出操作，返回操作状态或结果。 |
-| `move_validated_output_with_progress` | function | 执行带进度的移动已校验输出操作，返回操作状态或结果。 |
+| `move_validated_output_with_ui` | function | 在提交阶段把已校验的输出移到位，返回成功或移动错误；复制进度最多每 250 毫秒报告一次，另加第一次和最后一次。 |
+| `should_report_copy` | function | 判断一次复制进度更新是否值得报告，第一次和最后一次返回真，其余每个间隔最多一次。 |
+| `move_validated_output_with_progress` | function | 把已校验的输出移到目标位置，失败时回退为经由暂存文件的复制再重命名，返回成功或同时说明两次失败的错误；会删除自己创建的不完整暂存文件。 |
 | `copy_file_to_new_path` | function | 执行把文件复制到新路径的操作，返回操作状态或结果。 |
 | `copy_file_to_new_path_with_progress` | function | 执行带进度的把文件复制到新路径操作，返回操作状态或结果。 |
 | `final_commit_temp_path` | function | 提供最终提交临时路径的行为，返回声明的结果。 |
 | `metadata_repair_temp_path` | function | 提供元数据修复临时路径的行为，返回声明的结果。 |
 | `metadata_backup_temp_path` | function | 提供元数据备份临时路径的行为，返回声明的结果。 |
 | `apply` | function | 提供应用的行为，返回声明的结果。 |
-| `parse_progress_line` | function | 解析进度行输入，返回解析出的值或错误。 |
+| `parse_progress_line` | function | 解析一行 ffmpeg 进度，返回其中的更新，包括结束每个报告块的 `progress=` 行。 |
+| `has_pending_review` | function | 检查一个源文件是否已经有一次转换在等待决定，旁边存在复核文件时返回真；每次扫描中每个目录至多读取一次。 |
 | `parse_hms` | function | 解析时分秒输入，返回解析出的值或错误。 |
 | `start` | function | 启动可选的标准输入监听，以接收优雅停止请求。 |
 | `prompt_active_flag` | function | 克隆“提示进行中”标志以协调进度渲染，返回共享的标志句柄。 |

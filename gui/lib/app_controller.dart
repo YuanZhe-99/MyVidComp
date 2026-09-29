@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 
@@ -63,6 +64,7 @@ class LogEntry {
 class FileRecord {
   const FileRecord({
     required this.name,
+    this.path = '',
     required this.outcome,
     required this.detail,
     this.detailCode = '',
@@ -72,6 +74,10 @@ class FileRecord {
   });
 
   final String name;
+
+  /// The full source path, which tells apart two files with the same name in
+  /// different folders.
+  final String path;
   final FileOutcome outcome;
 
   /// What the engine said, in English. Shown only when there is no better
@@ -140,6 +146,11 @@ class AppController extends ChangeNotifier {
 
   final List<FileRecord> _records = [];
   final List<LogEntry> _log = [];
+
+  /// Read-only views made once, so a list that draws row by row does not copy
+  /// the whole list for every row.
+  late final List<FileRecord> _recordsView = UnmodifiableListView(_records);
+  late final List<LogEntry> _logView = UnmodifiableListView(_log);
   List<PendingReview> _reviews = const [];
   bool _loadingReviews = false;
 
@@ -173,9 +184,9 @@ class AppController extends ChangeNotifier {
   int get reviewCount => _reviewCount;
   int get sourceBytes => _sourceBytes;
   int get outputBytes => _outputBytes;
-  List<FileRecord> get records => List.unmodifiable(_records);
-  List<LogEntry> get log => List.unmodifiable(_log);
-  List<PendingReview> get reviews => List.unmodifiable(_reviews);
+  List<FileRecord> get records => _recordsView;
+  List<LogEntry> get log => _logView;
+  List<PendingReview> get reviews => _reviews;
   bool get loadingReviews => _loadingReviews;
 
   /// True while a run is under way, whether this interface started it or the
@@ -262,7 +273,9 @@ class AppController extends ChangeNotifier {
     _loadingReviews = true;
     notifyListeners();
     try {
-      _reviews = await _reviewStore.list(_settings.targetFolder);
+      _reviews = List.unmodifiable(
+        await _reviewStore.list(_settings.targetFolder),
+      );
     } catch (error) {
       // The engine is what reads this list, and it can be missing or unusable.
       // The screen that reports missing tools covers that case, so the list is
@@ -381,10 +394,18 @@ class AppController extends ChangeNotifier {
 
     switch (event.kind) {
       case WorkerEventType.log:
-        _pushLog(event.message ?? '', _levelFor(data['level'] as String?));
+        _pushLog(
+          event.message ?? '',
+          level: _levelFor(data['level'] as String?),
+          notify: false,
+        );
       case WorkerEventType.capabilityMissing:
         _notice = data['detail'] as String?;
-        _pushLog(data['detail'] as String? ?? '', LogLevel.warning);
+        _pushLog(
+          data['detail'] as String? ?? '',
+          level: LogLevel.warning,
+          notify: false,
+        );
       case WorkerEventType.scanStarted:
         _stage = RunStage.scanning;
       case WorkerEventType.scanFinished:
@@ -395,9 +416,11 @@ class AppController extends ChangeNotifier {
         _stage = RunStage.done;
       case WorkerEventType.fileSkipped:
         _skipped += 1;
+        final skippedPath = data['path'] as String? ?? '';
         _records.add(
           FileRecord(
-            name: _fileName(data['path'] as String? ?? ''),
+            name: _fileName(skippedPath),
+            path: skippedPath,
             outcome: FileOutcome.skipped,
             detail: data['reason'] as String? ?? '',
             detailCode: data['reason_code'] as String? ?? '',
@@ -442,15 +465,18 @@ class AppController extends ChangeNotifier {
               score: score,
               setting: data['quality'] as String?,
             ),
+            notify: false,
           );
         }
       case WorkerEventType.qualityMeasured:
         _lastScore = data['score'] as int?;
       case WorkerEventType.reviewPending:
         _reviewCount += 1;
+        final originalPath = data['original_path'] as String? ?? '';
         _records.add(
           FileRecord(
-            name: _fileName(data['original_path'] as String? ?? ''),
+            name: _fileName(originalPath),
+            path: originalPath,
             outcome: FileOutcome.needsReview,
             detail: ((data['deviations'] as List<Object?>?) ?? const [])
                 .whereType<String>()
@@ -487,20 +513,23 @@ class AppController extends ChangeNotifier {
   // AI-FUNC-SUMMARY: Records the outcome of one finished file; returns none; side effects: updates the record list and counters.
   void _recordFinished(Map<String, Object?> data) {
     final status = data['status'] as String? ?? '';
-    final name = _fileName(data['input_path'] as String? ?? '');
+    final path = data['input_path'] as String? ?? '';
+    final name = _fileName(path);
     final message = data['message'] as String? ?? '';
 
     if (status == 'converted') {
       // A conversion kept for review was already recorded when it happened.
+      // Matched by full path: two folders can each hold a `clip.mp4`.
       final alreadyRecorded = _records.any(
         (record) =>
-            record.name == name && record.outcome == FileOutcome.needsReview,
+            record.path == path && record.outcome == FileOutcome.needsReview,
       );
       if (!alreadyRecorded) {
         _converted += 1;
         _records.add(
           FileRecord(
             name: name,
+            path: path,
             outcome: FileOutcome.converted,
             // The sizes are on the wire, so the sentence about them is written
             // here rather than parsed out of the engine's English.
@@ -517,6 +546,7 @@ class AppController extends ChangeNotifier {
       _records.add(
         FileRecord(
           name: name,
+          path: path,
           outcome: FileOutcome.failed,
           detail: message,
           detailCode: 'failed',
@@ -541,21 +571,30 @@ class AppController extends ChangeNotifier {
     unawaited(refreshReviews());
   }
 
-  // AI-FUNC-SUMMARY: Adds one sentence from the engine to the details log; returns none; side effects: updates the log.
-  void _pushLog(String message, [LogLevel level = LogLevel.info]) {
+  // AI-FUNC-SUMMARY: Adds one sentence from the engine to the details log; returns none; side effects: updates the log and, unless `notify` is false because the caller notifies once itself, notifies listeners.
+  void _pushLog(
+    String message, {
+    LogLevel level = LogLevel.info,
+    bool notify = true,
+  }) {
     if (message.trim().isEmpty) {
       return;
     }
-    _pushEntry(LogEntry(level: level, message: message));
+    _pushEntry(
+      LogEntry(level: level, message: message),
+      notify: notify,
+    );
   }
 
-  // AI-FUNC-SUMMARY: Adds one line to the details log, keeping it from growing without bound; returns none; side effects: updates the log.
-  void _pushEntry(LogEntry entry) {
+  // AI-FUNC-SUMMARY: Adds one line to the details log, keeping it from growing without bound; returns none; side effects: updates the log and, unless `notify` is false, notifies listeners.
+  void _pushEntry(LogEntry entry, {bool notify = true}) {
     _log.insert(0, entry);
     if (_log.length > 500) {
       _log.removeRange(500, _log.length);
     }
-    notifyListeners();
+    if (notify) {
+      notifyListeners();
+    }
   }
 
   // AI-FUNC-SUMMARY: Maps an engine log level to how the line is shown; returns the level, defaulting to information; side effects: none.

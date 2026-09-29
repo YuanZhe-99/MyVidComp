@@ -44,7 +44,7 @@
 | `parse_ratio` | function | 解析比例输入，返回解析出的值或错误。 |
 | `parse_frame_rate` | function | 解析帧率输入，返回解析出的值或错误。 |
 | `progress_bar` | function | 提供进度条的行为，返回声明的结果。 |
-| `estimate_eta` | function | 构造或推导剩余时间估算值，返回算得的值。 |
+| `estimate_eta` | function | 根据已完成的比例估算剩余时间，比例不是正的有限数时返回零，且绝不超过 `u32::MAX` 秒；从不 panic。 |
 | `format_duration` | function | 构造或推导时长的显示文本，返回算得的值。 |
 | `format_bytes` | function | 构造或推导字节数的显示文本，返回算得的值。 |
 | `size_change_label` | function | 提供体积变化标签的行为，返回声明的结果。 |
@@ -53,4 +53,5 @@
 | `with_added_suffix` | function | 提供追加后缀的行为，返回声明的结果。 |
 | `has_added_suffix` | function | 检查是否带有追加的后缀，返回一个布尔值。 |
 | `temp_output_path` | function | 提供临时输出路径的行为，返回一个带时间戳、且容器扩展名正确的 MyVidComp 临时路径。 |
-| `cached_temp_output_paths` | function | 提供缓存临时输出路径的行为，返回两种容器中相匹配的 MyVidComp 临时文件，最新的在前。 |
+| `cached_temp_output_paths` | function | 列出为某个源留下的 MyVidComp 临时文件，只返回两种容器中名称精确为 `<前缀><stem>-<数字>.tmp.mp4/.mkv` 的文件，最新的在前。 |
+| `is_cached_temp_name` | function | 检查文件名是否恰好为前缀加数字再加 `.tmp.mp4` 或 `.tmp.mkv`，仅此形式返回真。 |

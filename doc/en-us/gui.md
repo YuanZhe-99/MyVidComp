@@ -42,7 +42,13 @@ distinct from its wire value in every language.
 
 ## How it runs
 
-- Conversion runs on a worker isolate, so the interface stays responsive.
+- Conversion runs on a worker isolate, so the interface stays responsive. Listing pending reviews
+  runs on a short-lived isolate of its own, so a large folder tree never freezes the interface.
+- The progress and log lists are read through views made once, not copied for every row, and one
+  engine event redraws the screen once. Files are told apart by full path, so two folders that
+  each hold a `clip.mp4` get a line each.
+- The Windows folder dialog returns its path as UTF-8, so a folder named in any language comes
+  back intact.
 - The interface requires ABI version 1 or newer and reports plainly when the engine is missing or
   mismatched, rather than crashing while it starts.
 - Stopping is graceful: the running ffmpeg is never interrupted, and the run ends after the file it
@@ -56,6 +62,8 @@ distinct from its wire value in every language.
 
 - Stored in the user's profile as `settings.json`, under `MyVidComp` on Windows and macOS and
   `myvidcomp` elsewhere. Never in `config.yaml`, which belongs to the user.
+- Saving writes a temporary file beside `settings.json` and renames it into place, so a crash
+  mid-write never leaves a half-written settings file.
 - A settings file written by the previous version is read once, so an existing install keeps its
   folder, tool paths and language. The retired conversion-mode value is mapped onto the encoder
   preference.

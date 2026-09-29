@@ -44,7 +44,7 @@ setting without test encodes. Described for readers in [../encoders.md](../encod
 | `parse_ratio` | function | Parses ratio input, returning parsed values or errors. |
 | `parse_frame_rate` | function | Parses frame rate input, returning parsed values or errors. |
 | `progress_bar` | function | Provides progress bar behavior, returning the declared result. |
-| `estimate_eta` | function | Builds or derives estimate eta data, returning the computed value. |
+| `estimate_eta` | function | Estimates the time left from the share done so far, returning zero for a share that is not a positive finite number and never more than `u32::MAX` seconds; never panics. |
 | `format_duration` | function | Builds or derives format duration data, returning the computed value. |
 | `format_bytes` | function | Builds or derives format bytes data, returning the computed value. |
 | `size_change_label` | function | Provides size change label behavior, returning the declared result. |
@@ -53,4 +53,5 @@ setting without test encodes. Described for readers in [../encoders.md](../encod
 | `with_added_suffix` | function | Provides with added suffix behavior, returning the declared result. |
 | `has_added_suffix` | function | Checks has added suffix predicate, returning a boolean. |
 | `temp_output_path` | function | Provides temp output path behavior, returning a timestamped MyVidComp temp path with the correct container extension. |
-| `cached_temp_output_paths` | function | Provides cached temp output paths behavior, returning matching MyVidComp temp files for both containers sorted newest-first. |
+| `cached_temp_output_paths` | function | Lists the MyVidComp temps left for one source, returning only exact `<prefix><stem>-<digits>.tmp.mp4/.mkv` names for both containers, sorted newest-first. |
+| `is_cached_temp_name` | function | Checks whether a file name is exactly a prefix followed by digits and `.tmp.mp4` or `.tmp.mkv`, returning true only for that shape. |

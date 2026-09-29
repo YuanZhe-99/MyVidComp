@@ -63,7 +63,15 @@ records and `myvidcomp_review_resolve` applies one decision.
 
 ## Safety
 
-A decision never overwrites anything. Keeping the new file when something
-already has that name is refused rather than silently replacing it, and the
-record is only removed once the files are where the decision says they should
-be. A record whose files have moved or been deleted is ignored.
+A decision never overwrites anything. Keeping the new file when a different
+file already has that name is refused before anything is deleted, so the
+original, the conversion and the other file all stay as they were. A name that
+is the original itself, such as `clip.MP4` kept as `clip.mp4` on a disk that
+ignores letter case, is not a collision. The record is only removed once the
+files are where the decision says they should be. A record whose files have
+moved or been deleted is ignored.
+
+Listing pending reviews walks real folders only and never follows a folder
+link, so a link that points back up the tree cannot make it loop forever. Each
+folder is read once per scan to find the originals that already have a pending
+conversion.

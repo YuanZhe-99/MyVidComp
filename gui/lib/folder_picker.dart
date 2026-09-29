@@ -27,11 +27,12 @@ class FolderPicker {
     return _pickOnWindows(startIn);
   }
 
-  // AI-FUNC-SUMMARY: Shows the Windows folder dialog through a helper process; returns the chosen folder or null; side effects: starts PowerShell briefly.
+  // AI-FUNC-SUMMARY: Shows the Windows folder dialog through a helper process; returns the chosen folder or null; side effects: starts PowerShell briefly, which writes the path as UTF-8 so a folder named in any language comes back intact.
   Future<String?> _pickOnWindows(String? startIn) async {
     final initial = (startIn ?? '').replaceAll("'", "''");
     final script =
         '''
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding \$false
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 \$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 \$dialog.Description = 'Choose the folder holding your videos'
@@ -51,9 +52,8 @@ if (\$dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         'Bypass',
         '-Command',
         script,
-      ], stdoutEncoding: const SystemEncoding());
-      final path = (result.stdout as String).trim();
-      return path.isEmpty ? null : path;
+      ], stdoutEncoding: utf8);
+      return decodeFolderResult(result.stdout as String);
     } on ProcessException {
       return null;
     }
@@ -139,10 +139,10 @@ class FolderBrowser {
   }
 }
 
-// AI-FUNC-SUMMARY: Reads a folder path out of a helper process's output; returns the trimmed path or null; side effects: none.
+// AI-FUNC-SUMMARY: Reads a folder path out of a helper process's output; returns the trimmed path without any byte-order mark, or null; side effects: none.
 String? decodeFolderResult(String raw) {
   final trimmed = const LineSplitter()
-      .convert(raw)
+      .convert(raw.replaceAll('﻿', ''))
       .map((line) => line.trim())
       .where((line) => line.isNotEmpty)
       .join();

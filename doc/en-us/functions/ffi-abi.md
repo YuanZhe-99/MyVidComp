@@ -14,7 +14,9 @@ The exported C boundary the application drives the engine through. Described for
 | `myvidcomp_run_blocking_v1` | function | Runs a full conversion pass for FFI callers and reports progress through a JSON callback.. |
 | `myvidcomp_review_list` | function | Lists conversions in a folder that are waiting for a keep-or-discard decision, returning allocated JSON text. |
 | `myvidcomp_review_resolve` | function | Applies a keep-new, keep-original, or keep-both decision to one pending review, returning null on success or an allocated error string. |
-| `run_ffi_blocking` | function | Runs the shared workflow for an FFI caller, returning null or an allocated error string. |
+| `run_ffi_blocking` | function | Runs the shared workflow for an FFI caller, returning null or an allocated error string; a panic in the engine comes back as an error instead of aborting the host. |
+| `guard_ffi` | function | Runs one FFI body so that a panic becomes an ordinary error, returning the body's value or the error built from the panic message; used by the run, review-list and review-resolve exports. |
+| `panic_message` | function | Reads the text out of a panic payload, returning the message or a fixed phrase when the payload is not text. |
 | `run_options_from_ffi_v1` | function | Converts versioned FFI run options into safe Rust run options, returning options or a validation error. |
 | `ffi_choice` | function | Reads one optional enum-valued C string and normalizes it, returning the parsed value or the type default. |
 | `ffi_isize` | function | Converts an FFI count into a platform integer, returning the count or a range error. |

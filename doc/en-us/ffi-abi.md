@@ -57,6 +57,11 @@ A null return from a run entry point means success; a non-null error string must
 call. The callback must copy the JSON event string before returning and must not unwind back
 across the boundary.
 
+In the other direction, a panic inside the engine never crosses the boundary either: the run,
+review-list and review-resolve entry points catch it and return it as an ordinary error string
+starting `internal error:` (for the review list, as a JSON `error` field), so a bug in the engine
+fails one call instead of closing the host application.
+
 ## Event JSON
 
 Events arrive as compact JSON strings with a `type` field. The types are:

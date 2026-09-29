@@ -24,7 +24,7 @@
 | `build_trial_args` | function | 构造以某个试验画质编码一个样本的 ffmpeg 参数，返回参数列表。 |
 | `paths` | function | 报告已提取出来的样本文件，返回它们的路径。 |
 | `drop` | function | 删除提取出来的样本，无返回值。 |
-| `extract_samples` | function | 把若干短样本从源复制到工作目录，返回这些样本，一个也取不到时返回错误。 |
+| `extract_samples` | function | 把若干短样本从源复制到工作目录，返回这些样本，一个也取不到时返回错误；失败的样本立即删除，出错中止时删除已写入的全部样本。 |
 | `measure_trial` | function | 以同一个画质设置编码每个样本并测量结果，返回各样本分数的平均值。 |
 | `trial_quality_args` | function | 构造一次试验编码在快速预设下的画质参数，返回参数列表。 |
 | `quality_from_value` | function | 把搜索得到的值换算回编码实际使用的画质设置，返回该设置。 |

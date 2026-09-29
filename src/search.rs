@@ -262,7 +262,7 @@ impl Drop for SampleSet {
     }
 }
 
-// AI-FUNC-SUMMARY: Copies short samples out of a source into the working directory; returns the samples, or an error when none could be taken; side effects: runs ffmpeg once per sample and writes temporary files.
+// AI-FUNC-SUMMARY: Copies short samples out of a source into the working directory; returns the samples, or an error when none could be taken; side effects: runs ffmpeg once per sample and writes temporary files, removing a failed sample at once and every written sample when an error ends the extraction.
 pub(crate) fn extract_samples(
     input: &Path,
     video: &VideoInfo,
@@ -271,7 +271,8 @@ pub(crate) fn extract_samples(
     stamp: u128,
     run: StreamedRunner<'_>,
 ) -> Result<SampleSet, String> {
-    let mut paths = Vec::new();
+    // Every sample joins the set as soon as it exists, so an error part-way
+    // through still removes the ones already written when the set drops.
     let mut set = SampleSet { paths: Vec::new() };
 
     for (index, start) in sample_offsets(video.duration_seconds, plan)
@@ -293,15 +294,16 @@ pub(crate) fn extract_samples(
         // A sample that could not be taken is skipped rather than fatal: the
         // remaining samples still describe the file well enough.
         if output.status.success() && path.is_file() {
-            paths.push(path);
+            set.paths.push(path);
+        } else {
+            let _ = fs::remove_file(&path);
         }
     }
 
-    if paths.is_empty() {
+    if set.paths.is_empty() {
         return Err("could not take any samples from this file".to_string());
     }
 
-    set.paths = paths;
     Ok(set)
 }
 

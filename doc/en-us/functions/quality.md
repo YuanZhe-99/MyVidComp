@@ -24,7 +24,7 @@ Described for readers in [../quality.md](../quality.md).
 | `build_trial_args` | function | Builds the ffmpeg arguments that encode one sample at a trial quality, returning the argument list. |
 | `paths` | function | Reports the sample files that were extracted, returning their paths. |
 | `drop` | function | Removes the extracted samples, returning none. |
-| `extract_samples` | function | Copies short samples out of a source into the working directory, returning the samples, or an error when none could be taken. |
+| `extract_samples` | function | Copies short samples out of a source into the working directory, returning the samples, or an error when none could be taken; removes a failed sample at once and every written sample when an error ends extraction. |
 | `measure_trial` | function | Encodes every sample at one quality setting and measures the result, returning the average score across the samples. |
 | `trial_quality_args` | function | Builds the quality arguments for one trial encode at a fast preset, returning the argument list. |
 | `quality_from_value` | function | Converts a searched value back into the quality setting the encode will use, returning the setting. |

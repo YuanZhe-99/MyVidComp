@@ -148,3 +148,32 @@ changed in each one.
   also supplied in the shape-independent form Android has wanted since version 8: the artwork inset
   on a white ground, so a launcher that draws icons as circles crops the background rather than the
   picture.
+- `2026-09-28`: Released as **MyVidComp 0.1.5**, a maintenance release of fixes with no new
+  features.
+- `2026-09-28`: A source whose extension is upper case, such as `clip.MP4`, is converted instead of
+  being skipped as a conflict with itself. On a disk that ignores letter case `clip.mp4` is the
+  source, not a second file, so the two paths are now compared as files (same device and inode with
+  one link on Linux, macOS and Android; the same full path on Windows). The commit treats that name
+  as the source and goes through the recovery rename; the check is made before anything moves,
+  because the move-then-delete path would otherwise delete the converted file right after writing
+  it. Keeping a reviewed conversion now refuses, before deleting the original, when a different
+  file already holds the final name.
+- `2026-09-28`: A temp left by an earlier run is held to a duration tolerance ten times tighter
+  than a fresh encode (the larger of 0.5 s and 0.1%), because a run that was stopped part-way
+  leaves a file that is only a little short. Reused temps are checked against the codec the run
+  asked for rather than always AV1, a temp in the wrong codec is recognized and removed again (the
+  message it was matched by had been reworded), and only exact `<stem>-<digits>` temp names are
+  claimed, so `clip` never takes the temps of `clip-b`. A reused temp from an adapted hardware
+  attempt now reports its pixel-format change, so it is measured and can go to review instead of
+  being committed silently.
+- `2026-09-28`: Cleanup and robustness: quality-search samples are removed when extraction fails
+  part-way; a partial copy-fallback staging file is removed; a stale metadata-repair file no longer
+  blocks every later repair; ffmpeg is killed and reaped when its progress can no longer be read;
+  the time-left estimate can no longer panic; a panic in the engine comes back from the embedding
+  interface as an error instead of closing the application; listing reviews never follows a folder
+  link; a deviation containing `]` survives its record. Progress is drawn once per ffmpeg report,
+  copy progress at most every 250 ms, and each folder is read once per scan for pending reviews.
+- `2026-09-28`: The application lists pending reviews off the interface thread, reads its progress
+  and log lists without copying them per row, redraws once per engine event, tells apart files with
+  the same name in different folders, saves settings atomically, and reads the Windows folder
+  dialog's answer as UTF-8.

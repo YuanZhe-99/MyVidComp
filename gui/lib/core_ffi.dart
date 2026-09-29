@@ -415,6 +415,9 @@ class _CoreLibrary {
 
   bool get isUsable => abiVersion >= 1 && _runBlocking != null;
 
+  /// Whether this library can list pending reviews at all.
+  bool get canListReviews => _reviewList != null;
+
   // AI-FUNC-SUMMARY: Allocates a cancellation token; returns the token pointer; side effects: allocates native memory.
   Pointer<Void> createToken() =>
       _tokenNew?.call() ?? Pointer<Void>.fromAddress(0);
@@ -597,12 +600,14 @@ class PendingReview {
 class ReviewStore {
   const ReviewStore();
 
-  // AI-FUNC-SUMMARY: Lists the conversions in a folder waiting for a decision; returns the reviews, newest folder scan first; side effects: reads the folder.
+  // AI-FUNC-SUMMARY: Lists the conversions in a folder waiting for a decision; returns the reviews, newest folder scan first; side effects: reads the folder on a short-lived background isolate, so a large folder tree never freezes the interface.
   Future<List<PendingReview>> list(String folder) async {
-    if (folder.trim().isEmpty) {
+    if (folder.trim().isEmpty || !_CoreLibrary.instance.canListReviews) {
       return const [];
     }
-    final text = _CoreLibrary.instance.listReviews(folder);
+    final text = await Isolate.run(
+      () => _CoreLibrary.instance.listReviews(folder),
+    );
     try {
       final decoded = jsonDecode(text) as Map<String, Object?>;
       final entries = decoded['reviews'] as List<Object?>? ?? const [];
