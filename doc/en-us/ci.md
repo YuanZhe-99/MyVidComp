@@ -23,9 +23,11 @@ and their installers, the command-line package and the Android package, then ref
 unless the tag matches the version in `Cargo.toml`, writes one checksum file covering every
 download, and publishes them.
 
-The Windows packages bundle the rolling build of the FFmpeg 9.0 series. Dated builds were used
-before, until one was removed by its publisher and stopped a release; the rolling address of a
-fixed series does not expire.
+The Windows packages bundle a fixed FFmpeg 9.0.1 build from BtbN's month-end release
+(`autobuild-2026-08-31-13-27`). The rolling 9.0 build was used before, until a day's Arm build
+would not run and stopped the 0.1.5 release; a daily dated build was used before that, until
+its publisher removed it. Month-end releases are kept long-term. Moving to a newer FFmpeg means
+changing both addresses in `release.yml` to another month-end release.
 
 Starting the workflow by hand builds every package and stops there, leaving them as run
 artifacts. Only a tag publishes.

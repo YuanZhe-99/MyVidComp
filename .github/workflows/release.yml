@@ -10,10 +10,11 @@ permissions:
 
 env:
   FLUTTER_VERSION: "3.44.2"
-  # BtbN's rolling build of the FFmpeg 9.0 series. Their dated builds are
-  # removed after a few months, which stops any release that points at one.
-  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-9.0.zip"
-  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-winarm64-gpl-9.0.zip"
+  # A fixed FFmpeg 9.0.1 build from BtbN's month-end release. The rolling
+  # "latest" build changes daily and once shipped an Arm build that would not
+  # run; month-end releases are kept long-term, unlike the daily ones.
+  FFMPEG_X64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n9.0.1-11-ge47273f4d9-win64-gpl-9.0.zip"
+  FFMPEG_ARM64_URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n9.0.1-11-ge47273f4d9-winarm64-gpl-9.0.zip"
 
 jobs:
   windows:
