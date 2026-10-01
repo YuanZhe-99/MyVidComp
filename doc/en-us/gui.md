@@ -58,6 +58,19 @@ distinct from its wire value in every language.
   Windows never flashes a console window. The interface must not reintroduce a direct `-version`
   check for the same reason: on Windows it checks the file exists instead of running it.
 
+## Interface style
+
+Settings offers two interface styles beside the light, dark and device-following appearance:
+**Material 3**, the application's own Material 3 theme, and **Expressive**, the default. Expressive
+is that same theme with a theme-level approximation of Material 3 Expressive layered on top
+(`gui/lib/app_theme.dart`): larger corner radii for dialogs, sheets, menus, chips, fields and the
+floating action button; floating snack bars; buttons that are a pill at rest and a rounded square
+while pressed; heavier display, headline and title weights; the 2024 progress-indicator and slider
+designs; and the fade-forward page transition. Both styles use the same seed colour and colour
+scheme, keep the existing card and field customisations, and differ in no layout. Flutter has no
+Expressive components, so spring motion, wavy indicators and button groups are not imitated. There
+is no navigation-bar option: the application's navigation is the same in both styles.
+
 ## Settings
 
 - Stored in the user's profile as `settings.json`, under `MyVidComp` on Windows and macOS and
@@ -67,6 +80,8 @@ distinct from its wire value in every language.
 - A settings file written by the previous version is read once, so an existing install keeps its
   folder, tool paths and language. The retired conversion-mode value is mapped onto the encoder
   preference.
+- The style is stored as `uiStyle` (`material3` or `expressive`; `expressive` when missing or
+  unrecognised), beside `themeMode`.
 - An unknown or out-of-range stored value falls back to the default rather than reaching the
   engine.
 - The media tools are looked for beside the application, in a sibling `bin/` directory, in the

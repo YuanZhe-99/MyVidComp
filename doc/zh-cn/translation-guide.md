@@ -91,6 +91,7 @@
 | function index | 函数索引 | |
 | Tier A / Tier B | Tier A / Tier B | 文档覆盖分级标签，不译 |
 | l10n / localization | 本地化（l10n） | |
+| interface style | 界面风格 | Material 3 / Expressive 二选一；Material 3 与 Expressive 不译 |
 
 ## 6. 提交中文页前的检查清单
 

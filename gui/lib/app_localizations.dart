@@ -140,6 +140,9 @@ class AppText {
   String get themeSystem => _text('themeSystem');
   String get themeLight => _text('themeLight');
   String get themeDark => _text('themeDark');
+  String get uiStyleTitle => _text('uiStyleTitle');
+  String get uiStyleMaterial3 => _text('uiStyleMaterial3');
+  String get uiStyleExpressive => _text('uiStyleExpressive');
   String get reviewMarginLabel => _text('reviewMarginLabel');
   String get reviewMarginHelp => _text('reviewMarginHelp');
   String get automatic => _text('automatic');
@@ -316,6 +319,15 @@ class AppText {
     'dark' => themeDark,
     _ => themeSystem,
   };
+
+  // AI-FUNC-SUMMARY: Names one interface style; returns the label; side effects: none.
+  String uiStyleLabel(String value) =>
+      value == 'material3' ? uiStyleMaterial3 : uiStyleExpressive;
+
+  // AI-FUNC-SUMMARY: Explains one interface style; returns the sentence; side effects: none.
+  String uiStyleHelp(String value) => _text(
+    value == 'material3' ? 'uiStyleMaterial3Help' : 'uiStyleExpressiveHelp',
+  );
 
   // AI-FUNC-SUMMARY: Describes how many files are queued; returns the sentence; side effects: none.
   String filesFound(int count) => _format('filesFound', {'count': '$count'});
@@ -559,6 +571,12 @@ const Map<String, Map<String, String>> _strings = {
     'themeSystem': 'Match my device',
     'themeLight': 'Light',
     'themeDark': 'Dark',
+    'uiStyleTitle': 'Interface style',
+    'uiStyleMaterial3': 'Material 3',
+    'uiStyleExpressive': 'Expressive',
+    'uiStyleMaterial3Help': 'Standard Material 3.',
+    'uiStyleExpressiveHelp':
+        'Material 3 with rounder corners, bolder titles and buttons that change shape when pressed.',
     'reviewMarginLabel': 'Ask me when quality falls below',
     'reviewMarginHelp':
         'How far under your target a result may land before MyVidComp keeps both copies.',
@@ -733,6 +751,11 @@ const Map<String, Map<String, String>> _strings = {
     'themeSystem': '跟随系统',
     'themeLight': '浅色',
     'themeDark': '深色',
+    'uiStyleTitle': '界面风格',
+    'uiStyleMaterial3': 'Material 3',
+    'uiStyleExpressive': 'Expressive',
+    'uiStyleMaterial3Help': '标准的 Material 3 外观。',
+    'uiStyleExpressiveHelp': '在 Material 3 基础上采用更大的圆角、更醒目的标题，按钮按下时会变形。',
     'reviewMarginLabel': '画质低于多少时询问我',
     'reviewMarginHelp': '结果比目标低多少时，MyVidComp 会保留两份文件让你选择。',
     'automatic': '自动',
@@ -893,6 +916,11 @@ const Map<String, Map<String, String>> _strings = {
     'themeSystem': '跟隨系統',
     'themeLight': '淺色',
     'themeDark': '深色',
+    'uiStyleTitle': '介面風格',
+    'uiStyleMaterial3': 'Material 3',
+    'uiStyleExpressive': 'Expressive',
+    'uiStyleMaterial3Help': '標準的 Material 3 外觀。',
+    'uiStyleExpressiveHelp': '在 Material 3 基礎上採用更大的圓角、更醒目的標題，按鈕按下時會變形。',
     'reviewMarginLabel': '畫質低於多少時詢問我',
     'reviewMarginHelp': '結果比目標低多少時，MyVidComp 會保留兩份檔案讓你選擇。',
     'automatic': '自動',
@@ -1055,6 +1083,11 @@ const Map<String, Map<String, String>> _strings = {
     'themeSystem': '端末に合わせる',
     'themeLight': 'ライト',
     'themeDark': 'ダーク',
+    'uiStyleTitle': 'インターフェースのスタイル',
+    'uiStyleMaterial3': 'Material 3',
+    'uiStyleExpressive': 'Expressive',
+    'uiStyleMaterial3Help': '標準の Material 3 の外観です。',
+    'uiStyleExpressiveHelp': 'Material 3 に、より大きな角丸、太めの見出し、押すと形が変わるボタンを加えます。',
     'reviewMarginLabel': '画質がどれだけ下回ったら確認するか',
     'reviewMarginHelp': '目標をどれだけ下回ったときに、MyVidComp が両方のファイルを残して尋ねるかです。',
     'automatic': '自動',

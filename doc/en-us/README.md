@@ -48,7 +48,7 @@ The Rust core is `src/lib.rs` plus focused modules for the parts that stand on t
 `ffi.rs`. The application lives under `gui/` and builds for Windows, macOS, Linux and Android from
 one source tree.
 
-This tree documents version 0.1.5: three output codecs, quality measured with VMAF, flexible
+This tree documents version 0.1.6: three output codecs, quality measured with VMAF, flexible
 preservation with review, and the single-version embedding ABI.
 
 Per-file Dart declaration pages for `gui/lib/` are not maintained; [gui.md](gui.md) covers the

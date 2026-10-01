@@ -145,6 +145,14 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: (value) => update(settings.copyWith(themeMode: value)),
             ),
             ChoiceField<String>(
+              label: text.uiStyleTitle,
+              value: settings.uiStyle,
+              values: const ['material3', 'expressive'],
+              labelFor: text.uiStyleLabel,
+              helpFor: text.uiStyleHelp,
+              onChanged: (value) => update(settings.copyWith(uiStyle: value)),
+            ),
+            ChoiceField<String>(
               label: text.language,
               value: settings.language,
               values: languageCodes,

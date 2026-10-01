@@ -177,3 +177,10 @@ changed in each one.
   and log lists without copying them per row, redraws once per engine event, tells apart files with
   the same name in different folders, saves settings atomically, and reads the Windows folder
   dialog's answer as UTF-8.
+- `2026-10-01`: Released as **MyVidComp 0.1.6**. Settings gains an interface style, Material 3 or
+  Expressive (the default), stored as `uiStyle` beside `themeMode`. Expressive layers a theme-level
+  Material 3 Expressive approximation onto the existing theme: larger corner radii, floating snack
+  bars, buttons that morph from pill to rounded square when pressed, heavier title weights, the
+  2024 progress and slider designs and the fade-forward page transition. The colour scheme, the
+  seed colour and the layout are identical in both styles. The theme moved from `main.dart` into
+  `gui/lib/app_theme.dart`.

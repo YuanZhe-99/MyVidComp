@@ -216,6 +216,7 @@ void main() {
         ffprobe: '/bin/ffprobe',
         language: 'ja',
         themeMode: 'dark',
+        uiStyle: 'material3',
       );
 
       final restored = AppSettings.fromJson(settings.toJson());
@@ -229,6 +230,7 @@ void main() {
       expect(restored.reviewMargin, 150);
       expect(restored.language, 'ja');
       expect(restored.themeMode, 'dark');
+      expect(restored.uiStyle, 'material3');
     });
 
     test('settings from the previous version keep working', () {

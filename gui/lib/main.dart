@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app_controller.dart';
 import 'app_localizations.dart';
+import 'app_theme.dart';
 import 'pages/convert_page.dart';
 import 'pages/progress_page.dart';
 import 'pages/review_page.dart';
@@ -56,10 +57,8 @@ class _MyVidCompAppState extends State<MyVidCompApp> {
   @override
   // AI-FUNC-SUMMARY: Builds the application with its theme, language and home screen; returns the widget; side effects: none.
   Widget build(BuildContext context) {
-    // One seed colour produces a matching light and dark palette, so the
-    // interface follows the device instead of forcing one appearance.
-    const seed = Color(0xFF1D6FD0);
     final settings = _controller.settings;
+    final style = uiStyleFromName(settings.uiStyle);
 
     return MaterialApp(
       onGenerateTitle: (context) => AppText.of(context).appName,
@@ -77,30 +76,9 @@ class _MyVidCompAppState extends State<MyVidCompApp> {
         'dark' => ThemeMode.dark,
         _ => ThemeMode.system,
       },
-      theme: _theme(seed, Brightness.light),
-      darkTheme: _theme(seed, Brightness.dark),
+      theme: AppTheme.light(style),
+      darkTheme: AppTheme.dark(style),
       home: HomeShell(controller: _controller),
-    );
-  }
-
-  // AI-FUNC-SUMMARY: Builds the theme for one brightness; returns the theme; side effects: none.
-  ThemeData _theme(Color seed, Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: seed,
-      brightness: brightness,
-    );
-    return ThemeData(
-      colorScheme: scheme,
-      useMaterial3: true,
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: scheme.surfaceContainerLow,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-        isDense: true,
-      ),
     );
   }
 }

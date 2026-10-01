@@ -39,6 +39,7 @@ class AppSettings {
     required this.ffprobe,
     required this.language,
     required this.themeMode,
+    required this.uiStyle,
   });
 
   /// Bumped whenever a stored file needs interpreting differently.
@@ -75,6 +76,9 @@ class AppSettings {
   /// One of `system`, `light` or `dark`.
   final String themeMode;
 
+  /// One of `material3` or `expressive`.
+  final String uiStyle;
+
   static const AppSettings defaults = AppSettings(
     targetFolder: '',
     limit: 0,
@@ -95,6 +99,7 @@ class AppSettings {
     ffprobe: '',
     language: 'system',
     themeMode: 'system',
+    uiStyle: 'expressive',
   );
 
   // AI-FUNC-SUMMARY: Produces a copy with selected fields replaced; returns the new settings; side effects: none.
@@ -118,6 +123,7 @@ class AppSettings {
     String? ffprobe,
     String? language,
     String? themeMode,
+    String? uiStyle,
   }) => AppSettings(
     targetFolder: targetFolder ?? this.targetFolder,
     limit: limit ?? this.limit,
@@ -138,6 +144,7 @@ class AppSettings {
     ffprobe: ffprobe ?? this.ffprobe,
     language: language ?? this.language,
     themeMode: themeMode ?? this.themeMode,
+    uiStyle: uiStyle ?? this.uiStyle,
   );
 
   /// The engine reads -1 as "no limit"; the interface shows an empty box.
@@ -229,6 +236,10 @@ class AppSettings {
         'light',
         'dark',
       ], defaults.themeMode),
+      uiStyle: pick('uiStyle', const [
+        'material3',
+        'expressive',
+      ], defaults.uiStyle),
     );
   }
 
@@ -265,6 +276,7 @@ class AppSettings {
     'ffprobe': ffprobe,
     'language': language,
     'themeMode': themeMode,
+    'uiStyle': uiStyle,
   };
 }
 
