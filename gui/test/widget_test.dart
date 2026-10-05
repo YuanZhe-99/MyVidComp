@@ -78,7 +78,13 @@ Future<void> _scrollTo(WidgetTester tester, Finder target) async {
   await tester.scrollUntilVisible(
     target,
     200,
-    scrollable: find.byType(Scrollable).first,
+    // Shared rails scroll independently; select the active page's scrollable.
+    scrollable: find
+        .descendant(
+          of: find.byType(IndexedStack),
+          matching: find.byType(Scrollable),
+        )
+        .first,
   );
   await tester.pumpAndSettle();
 }

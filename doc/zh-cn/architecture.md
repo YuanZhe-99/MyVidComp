@@ -1,5 +1,7 @@
 # 架构
 
+P2 使用公共导航和实际内容约束，见 [shared-ui.md](shared-ui.md)。
+
 图形界面使用 MyApps-UI 的公共 Expressive 风格层；接入及升级顺序见
 [shared-ui.md](shared-ui.md)。
 

@@ -1,9 +1,16 @@
 # Version history
 
+## 0.2.1 — P2 navigation
+
+P2 adopts MyApps-UI `v0.1.1`, published to both remotes before app pointer updates. Shared navigation preserves app routes, optional destinations, badges and callbacks. Pages read actual shell content constraints; full-window routes subtract no rail. A stable content slot retains page state during resize, style and left/right rail changes. Split thresholds and data formats remain unchanged. Version `0.2.1+9`.
+
 Dated record of MyVidComp behaviour changes. Useful for understanding *why* a behavior exists before
 changing it — several entries record deliberate safety fixes that look like quirks otherwise.
 MyVidComp uses semantic versions. `--version` prints the version, and this page records what
 changed in each one.
+
+Local verification: analysis and all 41 Flutter tests passed.
+Rust format, Clippy and 174 tests also passed.
 
 ## Timeline
 

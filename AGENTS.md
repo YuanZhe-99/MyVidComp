@@ -172,3 +172,9 @@ are byte-identical across both trees.
 Secrets, credentials, user videos, packaged binaries under `dist/`, build outputs, or
 developer-machine absolute paths in package files. Documentation-only commits do not change
 versions.
+
+## MyApps milestone releases
+
+For each completed P milestone, increment the application patch version by 0.0.1.
+Publish the shared dependency first. Add accurate co-author trailers for materially
+participating agents; do not invent participation or an agent identity.

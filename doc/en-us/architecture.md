@@ -1,5 +1,7 @@
 # Architecture
 
+P2 uses shared navigation and measured content constraints; see [shared-ui.md](shared-ui.md).
+
 The GUI consumes the shared Expressive theme layer from MyApps-UI; see
 [shared-ui.md](shared-ui.md) for integration and update order.
 

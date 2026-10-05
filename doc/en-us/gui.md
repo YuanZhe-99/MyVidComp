@@ -19,6 +19,9 @@ The Review destination carries a badge whenever something is waiting.
 
 ## Layout
 
+P2 uses the shared navigation renderer, preserving the width policy below and
+review badges. The content slot stays stable during resize; see [shared-ui.md](shared-ui.md).
+
 One layout, three widths, chosen from the window rather than the device:
 
 | Width | Navigation | Options |

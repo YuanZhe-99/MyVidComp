@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:myapps_ui/myapps_ui.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app_controller.dart';
@@ -138,56 +139,27 @@ class _HomeShellState extends State<HomeShell> {
           child: IndexedStack(index: _index, children: pages),
         );
 
-        if (compact) {
-          return Scaffold(
-            appBar: _appBar(context, text, controller),
-            body: body,
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: _index,
-              onDestinationSelected: _select,
-              destinations: [
-                for (final destination in destinations)
-                  NavigationDestination(
-                    icon: _maybeBadge(
-                      destination.label == text.navReview,
-                      Icon(destination.icon),
-                      controller.reviewCount,
-                    ),
-                    label: destination.label,
-                  ),
-              ],
-            ),
-          );
-        }
-
-        return Scaffold(
+        return MyAppsNavigationShell(
           appBar: _appBar(context, text, controller),
-          body: Row(
-            children: [
-              NavigationRail(
-                selectedIndex: _index,
-                onDestinationSelected: _select,
-                extended: expanded,
-                minExtendedWidth: 200,
-                labelType: expanded
-                    ? NavigationRailLabelType.none
-                    : NavigationRailLabelType.all,
-                destinations: [
-                  for (final destination in destinations)
-                    NavigationRailDestination(
-                      icon: _maybeBadge(
-                        destination.label == text.navReview,
-                        Icon(destination.icon),
-                        controller.reviewCount,
-                      ),
-                      label: Text(destination.label),
-                    ),
-                ],
+          destinations: [
+            for (final destination in destinations)
+              MyAppsDestination(
+                icon: _maybeBadge(
+                  destination.label == text.navReview,
+                  Icon(destination.icon),
+                  controller.reviewCount,
+                ),
+                label: destination.label,
               ),
-              const VerticalDivider(width: 1),
-              Expanded(child: body),
-            ],
-          ),
+          ],
+          selectedIndex: _index,
+          onSelected: _select,
+          placement: compact ? NavPlacement.bottom : NavPlacement.side,
+          floatingExpressiveBar: false,
+          extendedRail: expanded,
+          railMinWidth: 72,
+          railGroupAlignment: -1,
+          child: body,
         );
       },
     );

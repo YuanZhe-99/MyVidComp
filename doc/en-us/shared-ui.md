@@ -1,6 +1,6 @@
 # Shared UI foundations
 
-MyApps-UI `v0.1.0` is embedded at repository-root `packages/myapps_ui`, using
+MyApps-UI `v0.1.1` is embedded at repository-root `packages/myapps_ui`, using
 relative submodule URL `../MyApps-UI.git`. The Flutter application depends on
 `../packages/myapps_ui/packages/myapps_ui` from `gui/pubspec.yaml`.
 Initialize submodules recursively after cloning.
@@ -16,3 +16,15 @@ The Rust engine does not depend on the UI package.
 Publish the library to both remotes before updating the app pointer. Pin its tagged
 commit and validate Flutter and Rust checks. Shared theme declarations are documented
 in the library; this repository documents its base theme and application behavior.
+
+## P2 navigation and actual space
+
+The application now delegates navigation rendering to `MyAppsNavigationShell`.
+App-side shells retain routes, destination filtering, selection persistence and reminder
+callbacks. Each page passes `context` to its width and bottom-inset helpers: measured
+shell content width is used once, and full-window routes subtract no rail. The legacy
+context-free helper remains for callers that explicitly request the old calculation.
+The stable content slot preserves page state across resize, style and rail-side changes.
+MyVidComp retains classic navigation, extended rails and review badges.
+
+Profile extraction remains P3; data formats are unchanged.
