@@ -1,5 +1,8 @@
 # Shared UI foundations
 
+The GUI pins MyApps-UI v0.1.6 for full-width segmented choices and scaled-text
+fallback. Existing option-count/dropdown policy and conversion settings stay here.
+
 ## P5 capabilities and attribution
 
 The GUI pins MyApps-UI v0.1.5 and displays myapps_ui's source and GNU GPL v3 notice

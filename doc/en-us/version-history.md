@@ -1,5 +1,10 @@
 # Version history
 
+## 0.2.5 — Full-width settings choices
+
+Pin MyApps-UI v0.1.6 for expanded segmented controls and large-text fallback.
+Keep existing dropdown policy and conversion settings; GUI and CLI versions align.
+
 ## 0.2.4 — P5 shared capabilities and attribution
 
 Pin MyApps-UI v0.1.5; show myapps_ui's GPL v3 and source notice in settings.
