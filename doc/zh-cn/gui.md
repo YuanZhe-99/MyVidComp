@@ -1,5 +1,8 @@
 # 应用程序
 
+设置选择控件显示与 MyApps-UI 共享，标签、选择策略和状态仍由应用负责，
+见 [shared-ui.md](shared-ui.md)。
+
 `gui/` 下的应用程序内嵌转换引擎，用同一套源码为 Windows、macOS、Linux 和 Android 构建。它通过
 [ffi-abi.md](ffi-abi.md) 中的 ABI 驱动引擎，消费结构化事件，而不是解析终端输出。
 

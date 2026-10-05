@@ -1,5 +1,8 @@
 # The application
 
+Settings choice rendering is shared with MyApps-UI while labels, selection policy
+and state remain app-owned; see [shared-ui.md](shared-ui.md).
+
 The application under `gui/` embeds the conversion engine and builds for Windows, macOS, Linux and
 Android from one source tree. It drives the engine through the ABI in
 [ffi-abi.md](ffi-abi.md) and consumes structured events rather than parsing terminal output.

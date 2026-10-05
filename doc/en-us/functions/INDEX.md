@@ -1,5 +1,9 @@
 # Function index
 
+ChoiceField keeps its app API and delegates rendering to MyAppsSettingsChoice.
+Its two private rendering helpers now live in the shared package;
+see [shared-ui.md](../shared-ui.md).
+
 GUI theme facade: [shared UI](../shared-ui.md) documents `gui/lib/app_theme.dart`:
 style-name parsing, brand/base construction, light/dark methods and shared exports.
 The Rust declaration totals below are unaffected by this extraction.

@@ -1,5 +1,10 @@
 # Version history
 
+## 0.2.3 — Shared settings controls
+
+- Delegate ChoiceField rendering to MyApps-UI v0.1.4, retaining labels and policy.
+- Align GUI, CLI and installer versions; complete the shared extraction.
+
 ## 0.2.2 — P3 shared library release
 
 - Pin MyApps-UI v0.1.2 for the GUI; no profile UI is added.

@@ -1,5 +1,8 @@
 # 函数索引
 
+ChoiceField 保留应用接口，委托 MyAppsSettingsChoice 显示。
+两个私有显示辅助函数现在位于公共包，见 [shared-ui.md](../shared-ui.md)。
+
 图形界面主题包装：[共享界面](../shared-ui.md) 描述 `gui/lib/app_theme.dart`：
 风格名称解析、品牌和基础主题构造、明暗主题方法及公共导出。
 本次抽取不改变下方 Rust 声明总数。

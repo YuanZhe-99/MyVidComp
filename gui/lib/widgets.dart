@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:myapps_ui/myapps_ui.dart';
 
 /// A titled block of related settings.
 class SectionCard extends StatelessWidget {
@@ -88,71 +89,18 @@ class ChoiceField<T> extends StatelessWidget {
   @override
   // AI-FUNC-SUMMARY: Builds one labelled choice with an explanation of the selection; returns the widget; side effects: none.
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final help = helpFor?.call(value) ?? '';
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: theme.textTheme.labelLarge),
-          const SizedBox(height: 8),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // A segmented row reads better than a dropdown, but only while
-              // the options still fit across the width available.
-              final fits = values.length <= 3 && constraints.maxWidth >= 340;
-              return fits ? _segmented(context) : _dropdown(context);
-            },
-          ),
-          if (help.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              help,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ],
-      ),
+    return MyAppsSettingsChoice<T>(
+      label: label,
+      value: value,
+      values: values,
+      labelFor: labelFor,
+      onChanged: onChanged,
+      helpFor: helpFor,
+      enabled: enabled,
+      segmentMinWidth: 340,
+      maxSegments: 3,
     );
   }
-
-  // AI-FUNC-SUMMARY: Builds the choice as a segmented row; returns the widget; side effects: none.
-  Widget _segmented(BuildContext context) => SegmentedButton<T>(
-    segments: [
-      for (final option in values)
-        ButtonSegment<T>(value: option, label: Text(labelFor(option))),
-    ],
-    selected: {value},
-    showSelectedIcon: false,
-    onSelectionChanged: enabled
-        ? (selection) => onChanged(selection.first)
-        : null,
-  );
-
-  // AI-FUNC-SUMMARY: Builds the choice as a dropdown; returns the widget; side effects: none.
-  Widget _dropdown(BuildContext context) => DropdownButtonFormField<T>(
-    initialValue: value,
-    isExpanded: true,
-    decoration: const InputDecoration(border: OutlineInputBorder()),
-    items: [
-      for (final option in values)
-        DropdownMenuItem<T>(
-          value: option,
-          child: Text(labelFor(option), overflow: TextOverflow.ellipsis),
-        ),
-    ],
-    onChanged: enabled
-        ? (selected) {
-            if (selected != null) {
-              onChanged(selected);
-            }
-          }
-        : null,
-  );
 }
 
 /// A labelled text box with optional helper text and a trailing action.

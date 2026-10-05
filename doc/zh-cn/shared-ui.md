@@ -1,5 +1,12 @@
 # 共享界面基础
 
+## 设置控件
+
+GUI 固定 MyApps-UI v0.1.4。ChoiceField 委托 MyAppsSettingsChoice 显示，
+保留公开构造器、标签、帮助和禁用行为。应用保留 340 像素、最多三个选项的分段
+策略及 AppText 目录。Rust 设置及存储仍由应用负责。抽取已完成，库的正式
+概念文档替代已完成的路线图。
+
 MyApps-UI `v0.1.2` 作为子模块放在仓库根目录的 `packages/myapps_ui`，使用
 相对地址 `../MyApps-UI.git`。Flutter 应用在 `gui/pubspec.yaml` 中依赖
 `../packages/myapps_ui/packages/myapps_ui`。

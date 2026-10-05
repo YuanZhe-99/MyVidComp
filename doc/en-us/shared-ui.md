@@ -1,5 +1,13 @@
 # Shared UI foundations
 
+## Settings controls
+
+The GUI pins MyApps-UI v0.1.4. ChoiceField delegates rendering to
+MyAppsSettingsChoice while retaining its public constructor, labels, help and
+disabled behavior. The app retains its 340-pixel/three-option segment policy and
+AppText catalog. Rust settings and persistence remain app-owned. The extraction is
+complete; library concept docs replace the completed roadmap.
+
 MyApps-UI `v0.1.2` is embedded at repository-root `packages/myapps_ui`, using
 relative submodule URL `../MyApps-UI.git`. The Flutter application depends on
 `../packages/myapps_ui/packages/myapps_ui` from `gui/pubspec.yaml`.
