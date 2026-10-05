@@ -1,6 +1,6 @@
 # 共享界面基础
 
-MyApps-UI `v0.1.1` 作为子模块放在仓库根目录的 `packages/myapps_ui`，使用
+MyApps-UI `v0.1.2` 作为子模块放在仓库根目录的 `packages/myapps_ui`，使用
 相对地址 `../MyApps-UI.git`。Flutter 应用在 `gui/pubspec.yaml` 中依赖
 `../packages/myapps_ui/packages/myapps_ui`。
 克隆后递归初始化子模块。
@@ -25,4 +25,9 @@ Rust 引擎不依赖界面包。
 保留原计算方式。固定内容位置在缩放、风格和侧栏方向切换时保留页面状态。
 MyVidComp 保留经典导航、展开侧栏和审核角标。
 
-资料抽取仍属于 P3，数据格式不变。
+P3 资料抽取已完成，数据格式不变。
+
+## P3 资料与头像
+
+MyVidComp 固定到 P3 共享版本，不新增资料依赖或界面。
+应用继续只使用主题和导航。

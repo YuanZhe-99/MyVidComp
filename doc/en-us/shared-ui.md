@@ -1,6 +1,6 @@
 # Shared UI foundations
 
-MyApps-UI `v0.1.1` is embedded at repository-root `packages/myapps_ui`, using
+MyApps-UI `v0.1.2` is embedded at repository-root `packages/myapps_ui`, using
 relative submodule URL `../MyApps-UI.git`. The Flutter application depends on
 `../packages/myapps_ui/packages/myapps_ui` from `gui/pubspec.yaml`.
 Initialize submodules recursively after cloning.
@@ -27,4 +27,9 @@ context-free helper remains for callers that explicitly request the old calculat
 The stable content slot preserves page state across resize, style and rail-side changes.
 MyVidComp retains classic navigation, extended rails and review badges.
 
-Profile extraction remains P3; data formats are unchanged.
+Profile extraction is complete in P3; data formats are unchanged.
+
+## P3 profile and avatar
+
+MyVidComp pins the P3 shared release without adding a profile dependency or UI.
+The application still consumes theme and navigation only.

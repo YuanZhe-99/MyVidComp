@@ -24,7 +24,7 @@
 [Setup]
 AppId={{78F9D601-311C-4038-B446-23D80DED8A7D}
 AppName=MyVidComp
-AppVersion=0.2.1
+AppVersion=0.2.2
 AppPublisher=yuanzhe
 AppPublisherURL=https://github.com/YuanZhe-99/MyVidComp
 DefaultDirName={autopf}\MyVidComp
@@ -36,11 +36,11 @@ OutputBaseFilename=MyVidComp_{#AppVersion}_arm64_Setup
 #else
 OutputBaseFilename=MyVidComp_{#AppVersion}_Setup
 #endif
-VersionInfoVersion=0.2.1.0
+VersionInfoVersion=0.2.2.0
 VersionInfoCompany=MyVidComp
 VersionInfoDescription=MyVidComp Installer
 VersionInfoProductName=MyVidComp
-VersionInfoProductVersion=0.2.1
+VersionInfoProductVersion=0.2.2
 Compression=lzma2
 SolidCompression=yes
 #ifdef ARM64

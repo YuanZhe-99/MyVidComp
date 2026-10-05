@@ -1,5 +1,10 @@
 # Version history
 
+## 0.2.2 — P3 shared library release
+
+- Pin MyApps-UI v0.1.2 for the GUI; no profile UI is added.
+- Align GUI, CLI and installer patch versions.
+
 ## 0.2.1 — P2 navigation
 
 P2 adopts MyApps-UI `v0.1.1`, published to both remotes before app pointer updates. Shared navigation preserves app routes, optional destinations, badges and callbacks. Pages read actual shell content constraints; full-window routes subtract no rail. A stable content slot retains page state during resize, style and left/right rail changes. Split thresholds and data formats remain unchanged. Version `0.2.1+9`.
