@@ -1,5 +1,10 @@
 # 共享界面基础
 
+## P5 能力与授权
+
+GUI 固定 MyApps-UI v0.1.5，在设置中显示 myapps_ui 源码及 GNU GPL v3 声明。
+仅依赖 myapps_ui，不宣称使用资料或布局包。转换布局和 Rust 引擎仍由应用负责。
+
 ## 设置控件
 
 GUI 固定 MyApps-UI v0.1.4。ChoiceField 委托 MyAppsSettingsChoice 显示，

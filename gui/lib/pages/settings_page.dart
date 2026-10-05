@@ -164,6 +164,17 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
         ),
+        const SectionCard(
+          title: 'MyApps-UI',
+          children: [
+            SelectableText(
+              'myapps_ui — GNU GPL version 3\n'
+              'Copyright (C) 2026 yuanzhe and contributors\n'
+              'https://github.com/YuanZhe-99/MyApps-UI\n'
+              'https://www.gnu.org/licenses/gpl-3.0.html',
+            ),
+          ],
+        ),
         Card(
           margin: const EdgeInsets.only(bottom: 16),
           child: ExpansionTile(

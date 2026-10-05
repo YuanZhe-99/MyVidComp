@@ -1,5 +1,11 @@
 # Shared UI foundations
 
+## P5 capabilities and attribution
+
+The GUI pins MyApps-UI v0.1.5 and displays myapps_ui's source and GNU GPL v3 notice
+in settings. Only myapps_ui is a dependency; profile/adaptive packages are not
+claimed as consumed. Conversion layouts and the Rust engine remain app-owned.
+
 ## Settings controls
 
 The GUI pins MyApps-UI v0.1.4. ChoiceField delegates rendering to

@@ -1,5 +1,10 @@
 # Version history
 
+## 0.2.4 — P5 shared capabilities and attribution
+
+Pin MyApps-UI v0.1.5; show myapps_ui's GPL v3 and source notice in settings.
+GUI, CLI and installer versions remain aligned; conversion policy is unchanged.
+
 ## 0.2.3 — Shared settings controls
 
 - Delegate ChoiceField rendering to MyApps-UI v0.1.4, retaining labels and policy.
