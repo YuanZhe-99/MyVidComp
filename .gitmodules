@@ -1,0 +1,3 @@
+[submodule "packages/myapps_ui"]
+	path = packages/myapps_ui
+	url = ../MyApps-UI.git

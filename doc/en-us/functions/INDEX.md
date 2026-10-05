@@ -1,5 +1,9 @@
 # Function index
 
+GUI theme facade: [shared UI](../shared-ui.md) documents `gui/lib/app_theme.dart`:
+style-name parsing, brand/base construction, light/dark methods and shared exports.
+The Rust declaration totals below are unaffected by this extraction.
+
 Total documented declarations in `src/`: **381**.
 
 Every declaration carries an `AI-FUNC-SUMMARY` comment in the source, and every one of those

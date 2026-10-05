@@ -60,6 +60,9 @@ distinct from its wire value in every language.
 
 ## Interface style
 
+The Expressive implementation is now shared through MyApps-UI `v0.1.0`;
+the application retains its base theme. See [shared-ui.md](shared-ui.md).
+
 Settings offers two interface styles beside the light, dark and device-following appearance:
 **Material 3**, the application's own Material 3 theme, and **Expressive**, the default. Expressive
 is that same theme with a theme-level approximation of Material 3 Expressive layered on top

@@ -7,6 +7,8 @@ changed in each one.
 
 ## Timeline
 
+- `0.2.0` — 2026-10-04: Consume MyApps-UI `v0.1.0` after library publication to both remotes. Share the Expressive overlay while retaining the GUI base theme, navigation, settings and Rust behavior. CI and release checkouts initialize submodules recursively. Flutter analysis and 41 tests passed; Rust format, Clippy and 174 tests passed. GUI version `0.2.0+8`; CLI `0.2.0`. Windows build was not run on this Linux host.
+
 - `2026-05-22`: Initial Rust CLI, config support, bundled runtime lookup, AV1 encoder selection,
   quality estimation, validation, progress UI, and Windows packaging.
 - `2026-05-22`: Added SMB-friendly discovery, `tmp_dir`, cross-device commit fallback, cached temp

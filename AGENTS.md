@@ -143,6 +143,10 @@ these are the load-bearing summary rules:
 
 ## Verification
 
+For MyApps-UI, read `doc/en-us/shared-ui.md`. Keep the GUI's own base theme;
+do not copy the shared Expressive implementation back into the app. Publish
+the library to both remotes before committing an app submodule pointer.
+
 ```bash
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings

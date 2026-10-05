@@ -1,5 +1,8 @@
 # 架构
 
+图形界面使用 MyApps-UI 的公共 Expressive 风格层；接入及升级顺序见
+[shared-ui.md](shared-ui.md)。
+
 ## MyVidComp 是什么
 
 MyVidComp（`myvidcomp`）是一个 Rust 命令行工具和可嵌入引擎：它把一整个文件夹的视频变小，测量每个

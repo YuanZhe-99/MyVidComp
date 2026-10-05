@@ -2,12 +2,15 @@ name: myvidcomp_gui
 description: "MyVidComp: shrink your video library without losing what matters."
 publish_to: 'none'
 
-version: 0.1.6+7
+version: 0.2.0+8
 
 environment:
   sdk: ^3.12.2
 
 dependencies:
+  # Shared theme and adaptive foundation, pinned by the MyApps-UI submodule.
+  myapps_ui:
+    path: ../packages/myapps_ui/packages/myapps_ui
   ffi: ^2.1.4
   flutter:
     sdk: flutter

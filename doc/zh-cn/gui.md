@@ -54,6 +54,9 @@
 
 ## 界面风格
 
+Expressive 实现现在通过 MyApps-UI `v0.1.0` 共享；
+应用保留基础主题。见 [shared-ui.md](shared-ui.md)。
+
 设置中除了浅色、深色和跟随设备的外观之外，还提供两种界面风格：**Material 3**，即应用自己的 Material 3
 主题；以及默认的 **Expressive**。Expressive 就是在同一主题之上叠加一层主题级别的 Material 3 Expressive
 近似效果（`gui/lib/app_theme.dart`）：对话框、面板、菜单、Chip、输入框和浮动操作按钮采用更大的圆角；

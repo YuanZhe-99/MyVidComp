@@ -32,6 +32,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -79,6 +81,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -110,6 +114,8 @@ jobs:
       HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: actions/setup-java@v5
         with:
@@ -208,6 +214,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - name: The tag and the crate agree
         run: |

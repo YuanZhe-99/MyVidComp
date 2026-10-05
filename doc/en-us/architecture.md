@@ -1,5 +1,8 @@
 # Architecture
 
+The GUI consumes the shared Expressive theme layer from MyApps-UI; see
+[shared-ui.md](shared-ui.md) for integration and update order.
+
 ## What MyVidComp is
 
 MyVidComp (`myvidcomp`) is a Rust command-line tool and embeddable engine that makes a folder of
