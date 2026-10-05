@@ -1,5 +1,8 @@
 # Shared UI foundations
 
+MyApps-UI v0.1.7 centers wrapped segment labels before vertical fallback.
+The GUI retains its existing segment-count and dropdown policy.
+
 The GUI pins MyApps-UI v0.1.6 for full-width segmented choices and scaled-text
 fallback. Existing option-count/dropdown policy and conversion settings stay here.
 

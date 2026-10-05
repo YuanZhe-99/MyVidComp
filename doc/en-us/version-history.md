@@ -1,5 +1,10 @@
 # Version history
 
+## 0.2.6 — Compact horizontal settings choices
+
+Pin MyApps-UI v0.1.7 for centered wrapped labels; preserve dropdown policy.
+GUI and CLI versions remain aligned.
+
 ## 0.2.5 — Full-width settings choices
 
 Pin MyApps-UI v0.1.6 for expanded segmented controls and large-text fallback.
