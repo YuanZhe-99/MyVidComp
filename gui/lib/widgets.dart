@@ -105,7 +105,7 @@ class LabelledField extends StatelessWidget {
   final ValueChanged<String>? onChanged;
 
   @override
-  // AI-FUNC-SUMMARY: Purpose: Render a text field using shared input styling; Inputs: context; Returns: Widget; Side effects: None; Notes: density and borders inherit the theme.
+  // AI-FUNC-SUMMARY: Purpose: Render a text field using shared input styling; Inputs: context; Returns: Widget; Side effects: None; Notes: narrow or scaled layouts place trailing actions below the field.
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
@@ -115,19 +115,33 @@ class LabelledField extends StatelessWidget {
         children: [
           Text(label, style: theme.textTheme.labelLarge),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  enabled: enabled,
-                  keyboardType: keyboardType,
-                  onChanged: onChanged,
-                  decoration: InputDecoration(hintText: hint),
-                ),
-              ),
-              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final field = TextField(
+                controller: controller,
+                enabled: enabled,
+                keyboardType: keyboardType,
+                onChanged: onChanged,
+                decoration: InputDecoration(hintText: hint),
+              );
+              if (trailing != null &&
+                  constraints.maxWidth <
+                      480 * MediaQuery.textScalerOf(context).scale(1)) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [field, const SizedBox(height: 8), trailing!],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: field),
+                  if (trailing != null) ...[
+                    const SizedBox(width: 8),
+                    trailing!,
+                  ],
+                ],
+              );
+            },
           ),
           if (help != null) ...[
             const SizedBox(height: 8),

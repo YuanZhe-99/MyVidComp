@@ -281,6 +281,37 @@ void main() {
   });
 
   group('layout', () {
+    testWidgets('long folder actions fit narrow windows with large text', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MediaQuery(
+              data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+              child: SizedBox(
+                width: 256,
+                child: LabelledField(
+                  label: 'Folder',
+                  controller: controller,
+                  trailing: FilledButton(
+                    onPressed: () {},
+                    child: const Text('Choose folder'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.getTopLeft(find.byType(FilledButton)).dy,
+        greaterThan(tester.getBottomLeft(find.byType(TextField)).dy),
+      );
+    });
     testWidgets('a phone-sized window puts navigation along the bottom', (
       tester,
     ) async {

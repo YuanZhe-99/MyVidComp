@@ -26,6 +26,8 @@ with no width or option-count dropdown gate. Shared segments wrap labels to two
 lines and fall back to vertical options when necessary, including scaled text.
 `SectionCard.build` uses shared section headings within theme-owned cards.
 `LabelledField.build` inherits shared input density and border styling.
+Trailing field actions move below the input when available width is below 480
+pixels multiplied by the text scale, keeping long desktop folder actions visible.
 `CountTile.build` uses theme-owned card shapes and semantic surface colors.
 `PageBody.build` supplies readable scrolling bounds and shared 16-pixel page spacing.
 Tool availability, review cards and progress logs use the same 16-pixel content
