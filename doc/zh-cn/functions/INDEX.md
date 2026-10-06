@@ -1,10 +1,11 @@
 # 函数索引
 
-ChoiceField 保留应用接口，委托 MyAppsSettingsChoice 显示。
-两个私有显示辅助函数现在位于公共包，见 [shared-ui.md](../shared-ui.md)。
+GUI 声明委托共享主题、导航、内联选项、设置行与分栏布局；
+SectionCard、LabelledField、CountTile 和 PageBody 继承共享展示规范。
+职责见 [shared-ui.md](../shared-ui.md)。
 
 图形界面主题包装：[共享界面](../shared-ui.md) 描述 `gui/lib/app_theme.dart`：
-风格名称解析、品牌和基础主题构造、明暗主题方法及公共导出。
+风格名称解析、带品牌色的共享主题构造、明暗主题方法及公共导出。
 本次抽取不改变下方 Rust 声明总数。
 
 `src/` 中已记录的声明总数：**381**。

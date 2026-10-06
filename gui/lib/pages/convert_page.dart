@@ -183,7 +183,7 @@ class _ToolStatus extends StatelessWidget {
   final VoidCallback onFix;
 
   @override
-  // AI-FUNC-SUMMARY: Builds the banner saying whether the video tools were found; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render tool availability in a shared themed card; Inputs: context; Returns: Widget; Side effects: None; Notes: semantic colors distinguish readiness and errors.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
     final theme = Theme.of(context);
@@ -196,45 +196,45 @@ class _ToolStatus extends StatelessWidget {
         ? theme.colorScheme.onPrimaryContainer
         : theme.colorScheme.onErrorContainer;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            ready ? Icons.check_circle_outline : Icons.error_outline,
-            color: foreground,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ready ? text.readyToolsFound : text.readyToolsMissing,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: foreground,
-                  ),
-                ),
-                if (!ready) ...[
-                  const SizedBox(height: 4),
+    return Card(
+      margin: EdgeInsets.zero,
+      color: background,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              ready ? Icons.check_circle_outline : Icons.error_outline,
+              color: foreground,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    text.toolsMissingHelp,
-                    style: theme.textTheme.bodySmall?.copyWith(
+                    ready ? text.readyToolsFound : text.readyToolsMissing,
+                    style: theme.textTheme.titleSmall?.copyWith(
                       color: foreground,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  TextButton(onPressed: onFix, child: Text(text.navSettings)),
+                  if (!ready) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      text.toolsMissingHelp,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: foreground,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(onPressed: onFix, child: Text(text.navSettings)),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

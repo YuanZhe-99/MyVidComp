@@ -143,8 +143,8 @@ these are the load-bearing summary rules:
 
 ## Verification
 
-For MyApps-UI, read `doc/en-us/shared-ui.md`. Keep the GUI's own base theme;
-do not copy the shared Expressive implementation back into the app. Publish
+For MyApps-UI, read `doc/en-us/shared-ui.md`. Delegate base and Expressive theme
+construction to the shared library; do not copy its implementation into the app. Publish
 the library to both remotes before committing an app submodule pointer.
 
 ```bash

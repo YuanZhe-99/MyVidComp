@@ -18,29 +18,14 @@ class AppTheme {
   /// The brand colour. One seed produces a matching light and dark palette.
   static const Color seedColor = Color(0xFF1D6FD0);
 
-  // AI-FUNC-SUMMARY: Builds the theme for one brightness and style; returns the theme; side effects: none; Notes: both styles share one colour scheme, expressive only adds shape, type weight and component details.
+  // AI-FUNC-SUMMARY: Purpose: Build the shared theme with the app brand; Inputs: brightness and style; Returns: ThemeData; Side effects: None; Notes: shared defaults own all component styling.
   static ThemeData build(
     Brightness brightness, [
     AppUiStyle style = AppUiStyle.expressive,
   ]) {
-    final scheme = ColorScheme.fromSeed(
+    return const MyAppsTheme(
       seedColor: seedColor,
-      brightness: brightness,
-    );
-    final base = ThemeData(
-      colorScheme: scheme,
-      useMaterial3: true,
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: scheme.surfaceContainerLow,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-        isDense: true,
-      ),
-    );
-    return MyAppsTheme.applyStyle(base, style);
+    ).build(brightness, null, style);
   }
 
   // AI-FUNC-SUMMARY: Returns the light theme for a style; returns the theme; side effects: none.

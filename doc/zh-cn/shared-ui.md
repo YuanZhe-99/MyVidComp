@@ -1,50 +1,38 @@
-# 共享界面基础
+# 共享 UI 基础
 
-MyApps-UI v0.1.7 在纵向回退前使用居中换行标签。GUI 保留既有选项数量和下拉策略。
+MyVidComp 使用 `packages/myapps_ui` 中的 MyApps-UI v0.1.7。Flutter 依赖路径为
+`../packages/myapps_ui/packages/myapps_ui`；克隆后需递归初始化子模块。
+Rust 引擎不依赖 UI 包。
 
-GUI 固定 MyApps-UI v0.1.6，使用全宽分段选项和大字体回退。既有选项数量、下拉
-策略和转换设置留在应用。
+## 主题与导航
 
-## P5 能力与授权
+`AppTheme.build` 向 `MyAppsTheme.build` 传入蓝色品牌种子。
+卡片、输入框、文字和 Expressive 细节采用共享默认值。已有风格名称和默认
+Expressive 风格保持兼容。
+`HomeShell.build` 向 `MyAppsNavigationShell` 传入当前风格，采用共享
+Expressive 浮动底栏和默认紧凑侧栏尺寸。窗口宽度达到 600 像素时使用侧栏；
+导航目标、复核角标和页面状态仍由应用管理。
 
-GUI 固定 MyApps-UI v0.1.5，在设置中显示 myapps_ui 源码及 GNU GPL v3 声明。
-仅依赖 myapps_ui，不宣称使用资料或布局包。转换布局和 Rust 引擎仍由应用负责。
+## 设置与选项
 
-## 设置控件
+`SettingsPage.build` 使用 `MyAppsSettingsSection`，并为外观、风格和语言采用完整的
+`MyAppsSettingsSegmentRow` 控件。
+实际内容宽度达到 900 像素时，`MyAppsPaneBody` 将常用设置与高级控件分开，
+两侧最小宽度均为 400 像素。
+窄屏在主滚动列表中包含高级控件。稳定的键在布局变化时保留文本输入和展开状态。
+`ChoiceField.build` 保留应用接口，并委托 `MyAppsSettingsChoice`，
+取消按宽度或选项数量切换下拉框的限制。共享分段标签最多换行两行，
+必要时回退为纵向选项，包括放大字体的情况。
+`SectionCard.build` 在采用主题样式的卡片中使用共享分组标题。
+`LabelledField.build` 继承共享输入框密度和边框样式。
+`CountTile.build` 使用主题卡片形状和语义表面颜色。
+`PageBody.build` 提供可读的滚动宽度和统一的 16 像素页面间距。
+工具状态、复核卡片和进度日志采用相同的 16 像素内容间距。
+指定编码器以本地化的只读设置行展示。
+转换设置、本地化、持久化和复核语义仍由应用管理。
 
-GUI 固定 MyApps-UI v0.1.4。ChoiceField 委托 MyAppsSettingsChoice 显示，
-保留公开构造器、标签、帮助和禁用行为。应用保留 340 像素、最多三个选项的分段
-策略及 AppText 目录。Rust 设置及存储仍由应用负责。抽取已完成，库的正式
-概念文档替代已完成的路线图。
+## 归属与更新
 
-MyApps-UI `v0.1.2` 作为子模块放在仓库根目录的 `packages/myapps_ui`，使用
-相对地址 `../MyApps-UI.git`。Flutter 应用在 `gui/pubspec.yaml` 中依赖
-`../packages/myapps_ui/packages/myapps_ui`。
-克隆后递归初始化子模块。
-
-`gui/lib/app_theme.dart` 重新导出 `AppUiStyle`，保留原主题包装、品牌色、
-零高度卡片和紧凑输入框。`MyAppsTheme.applyStyle` 提供 Expressive 覆盖层；
-Material 3 基础主题仍由应用负责。
-风格存储值、默认值、导航和转换行为不变。
-Rust 引擎不依赖界面包。
-
-## 升级
-
-先将库发布到两个远程，再更新应用指针。固定到标签
-并验证 Flutter 和 Rust 检查。库文档维护公共主题声明；
-本仓库描述基础主题和应用行为。
-
-## P2 导航与实际空间
-
-应用现在把导航绘制交给 `MyAppsNavigationShell`。应用导航壳保留路由、
-目的地过滤、选中位置持久化和提醒回调。页面把 `context` 传入宽度和底部留白
-函数，只使用一次实际内容宽度；全窗口路由不再扣除侧栏。无上下文的兼容函数
-保留原计算方式。固定内容位置在缩放、风格和侧栏方向切换时保留页面状态。
-MyVidComp 保留经典导航、展开侧栏和审核角标。
-
-P3 资料抽取已完成，数据格式不变。
-
-## P3 资料与头像
-
-MyVidComp 固定到 P3 共享版本，不新增资料依赖或界面。
-应用继续只使用主题和导航。
+设置页展示 myapps_ui 的源代码地址和 GNU GPL v3 声明。无需个人资料依赖。
+升级共享库时，先发布到两个远端，再在此固定带标签的提交。
+验证 Flutter 和 Rust 检查，并同步更新两种语言的文档。

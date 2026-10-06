@@ -132,7 +132,7 @@ class _ReviewCard extends StatelessWidget {
   final PendingReview review;
 
   @override
-  // AI-FUNC-SUMMARY: Builds one pending conversion with its three choices; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render a pending conversion with shared card spacing and decision controls; Inputs: context; Returns: Widget; Side effects: None; Notes: review semantics remain app-owned.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
     final theme = Theme.of(context);
@@ -141,7 +141,7 @@ class _ReviewCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

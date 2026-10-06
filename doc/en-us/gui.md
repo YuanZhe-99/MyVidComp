@@ -22,16 +22,16 @@ The Review destination carries a badge whenever something is waiting.
 
 ## Layout
 
-P2 uses the shared navigation renderer, preserving the width policy below and
-review badges. The content slot stays stable during resize; see [shared-ui.md](shared-ui.md).
+The shared navigation renderer uses the selected style and retains review badges.
+The content slot stays stable during resize; see [shared-ui.md](shared-ui.md).
 
 One layout, three widths, chosen from the window rather than the device:
 
 | Width | Navigation | Options |
 |---|---|---|
-| under 600 | along the bottom | dropdowns |
-| 600 to 1100 | rail down the side, icons and labels | segmented rows where they fit |
-| 1100 and above | rail opened out | segmented rows |
+| under 600 | floating bottom bar in Expressive; standard bar in Material 3 | inline segments with vertical fallback |
+| 600 to 1100 | shared compact side rail | inline segments with vertical fallback |
+| 1100 and above | shared compact side rail | inline segments with vertical fallback |
 
 Page content is capped at a readable width and centred, so a maximised window does not stretch a
 form across the screen. Every list scrolls; nothing is sized so that it can be cut off.
@@ -66,19 +66,19 @@ distinct from its wire value in every language.
 
 ## Interface style
 
-The Expressive implementation is now shared through MyApps-UI `v0.1.0`;
-the application retains its base theme. See [shared-ui.md](shared-ui.md).
+The base theme and Expressive implementation are shared through MyApps-UI `v0.1.7`.
+The application supplies its blue brand seed. See [shared-ui.md](shared-ui.md).
 
 Settings offers two interface styles beside the light, dark and device-following appearance:
-**Material 3**, the application's own Material 3 theme, and **Expressive**, the default. Expressive
+**Material 3**, the shared Material 3 theme, and **Expressive**, the default. Expressive
 is that same theme with a theme-level approximation of Material 3 Expressive layered on top
 (`gui/lib/app_theme.dart`): larger corner radii for dialogs, sheets, menus, chips, fields and the
 floating action button; floating snack bars; buttons that are a pill at rest and a rounded square
 while pressed; heavier display, headline and title weights; the 2024 progress-indicator and slider
 designs; and the fade-forward page transition. Both styles use the same seed colour and colour
-scheme, keep the existing card and field customisations, and differ in no layout. Flutter has no
+scheme and shared card and field defaults. Expressive uses a floating bottom navigation bar. Flutter has no
 Expressive components, so spring motion, wavy indicators and button groups are not imitated. There
-is no navigation-bar option: the application's navigation is the same in both styles.
+is no navigation-bar preference: navigation follows the selected interface style.
 
 ## Settings
 

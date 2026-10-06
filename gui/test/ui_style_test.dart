@@ -74,10 +74,10 @@ void main() {
       expect(AppTheme.dark().textTheme.titleLarge?.fontWeight, FontWeight.w600);
     });
 
-    test('material3 keeps the existing customisations', () {
+    test('material3 uses shared component defaults', () {
       final m3 = AppTheme.light(AppUiStyle.material3);
-      expect(m3.cardTheme.elevation, 0);
-      expect(m3.inputDecorationTheme.isDense, isTrue);
+      expect(m3.cardTheme.elevation, isNull);
+      expect(m3.inputDecorationTheme.isDense, isFalse);
       expect(m3.inputDecorationTheme.border, const OutlineInputBorder());
       expect(m3.dialogTheme.shape, isNull);
       expect(m3.snackBarTheme.behavior, isNull);
@@ -97,10 +97,9 @@ void main() {
         m3.textTheme.titleLarge?.fontSize,
       );
       expect(ex.textTheme.bodyMedium, m3.textTheme.bodyMedium);
-      // Existing customisations survive the layer.
-      expect(ex.cardTheme.elevation, 0);
+      expect(ex.cardTheme.elevation, m3.cardTheme.elevation);
       expect(ex.cardTheme.color, m3.cardTheme.color);
-      expect(ex.inputDecorationTheme.isDense, isTrue);
+      expect(ex.inputDecorationTheme.isDense, isFalse);
       expect(
         ex.pageTransitionsTheme.builders[TargetPlatform.windows],
         isA<FadeForwardsPageTransitionsBuilder>(),

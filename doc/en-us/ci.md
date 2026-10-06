@@ -21,7 +21,8 @@ skipping.
 `.github/workflows/release.yml` runs when a `v*` tag is pushed. It builds the two Windows packages
 and their installers, the command-line package and the Android package, then refuses to publish
 unless the tag matches the version in `Cargo.toml`, writes one checksum file covering every
-download, and publishes them.
+download, and publishes them. The Android release job checks that the final APK
+contains the ARM64 engine, FFmpeg and FFprobe before uploading it.
 
 The Windows packages bundle a fixed FFmpeg 9.0.1 build from BtbN's month-end release
 (`autobuild-2026-08-31-13-27`). The rolling 9.0 build was used before, until a day's Arm build

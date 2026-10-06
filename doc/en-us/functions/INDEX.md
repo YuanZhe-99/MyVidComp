@@ -1,11 +1,11 @@
 # Function index
 
-ChoiceField keeps its app API and delegates rendering to MyAppsSettingsChoice.
-Its two private rendering helpers now live in the shared package;
-see [shared-ui.md](../shared-ui.md).
+GUI declarations delegate shared theme, navigation, inline choices, settings rows
+and pane layout; SectionCard, LabelledField, CountTile and PageBody inherit the
+shared presentation. See [shared-ui.md](../shared-ui.md) for their responsibilities.
 
 GUI theme facade: [shared UI](../shared-ui.md) documents `gui/lib/app_theme.dart`:
-style-name parsing, brand/base construction, light/dark methods and shared exports.
+style-name parsing, branded shared-theme construction, light/dark methods and exports.
 The Rust declaration totals below are unaffected by this extraction.
 
 Total documented declarations in `src/`: **381**.

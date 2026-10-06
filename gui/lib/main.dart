@@ -104,7 +104,7 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   @override
-  // AI-FUNC-SUMMARY: Builds the navigation shell around the selected screen; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render style-aware shared navigation around stable pages; Inputs: context; Returns: Widget; Side effects: None; Notes: compact rail and floating Expressive bottom bar use shared defaults.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
     final controller = widget.controller;
@@ -133,7 +133,6 @@ class _HomeShellState extends State<HomeShell> {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final compact = width < HomeShell.compactWidth;
-        final expanded = width >= HomeShell.expandedWidth;
 
         final body = SafeArea(
           child: IndexedStack(index: _index, children: pages),
@@ -155,10 +154,7 @@ class _HomeShellState extends State<HomeShell> {
           selectedIndex: _index,
           onSelected: _select,
           placement: compact ? NavPlacement.bottom : NavPlacement.side,
-          floatingExpressiveBar: false,
-          extendedRail: expanded,
-          railMinWidth: 72,
-          railGroupAlignment: -1,
+          style: uiStyleFromName(controller.settings.uiStyle),
           child: body,
         );
       },

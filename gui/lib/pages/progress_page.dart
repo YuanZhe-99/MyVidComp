@@ -267,7 +267,7 @@ class _DetailsLog extends StatelessWidget {
   final AppController controller;
 
   @override
-  // AI-FUNC-SUMMARY: Builds the collapsible technical log; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render the collapsible log with common card spacing; Inputs: context; Returns: Widget; Side effects: None; Notes: the visible log remains bounded.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
 
@@ -276,7 +276,7 @@ class _DetailsLog extends StatelessWidget {
       child: ExpansionTile(
         title: Text(text.details),
         shape: const Border(),
-        childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 280),

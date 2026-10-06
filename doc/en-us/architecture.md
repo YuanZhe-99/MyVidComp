@@ -4,7 +4,7 @@ P3 shared profile ownership and adapters: [shared-ui.md](shared-ui.md). Existing
 
 P2 uses shared navigation and measured content constraints; see [shared-ui.md](shared-ui.md).
 
-The GUI consumes the shared Expressive theme layer from MyApps-UI; see
+The GUI consumes the shared base theme, Expressive layer and settings panes from MyApps-UI; see
 [shared-ui.md](shared-ui.md) for integration and update order.
 
 ## What MyVidComp is

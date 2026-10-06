@@ -1,5 +1,14 @@
 # Version history
 
+## 0.3.0 — Unified MyApps-UI presentation
+
+Adopt MyApps-UI v0.1.7 base themes, style-aware floating navigation, shared settings
+sections and complete appearance rows. Settings use responsive common/advanced panes;
+choices prefer inline segments with text-aware vertical fallback. Business cards,
+inputs and statistics follow shared theme defaults. GUI build number is 15.
+Windows fallback metadata matches this version; Android publication verifies all
+three required native libraries in the final APK.
+
 ## 0.2.6 — Compact horizontal settings choices
 
 Pin MyApps-UI v0.1.7 for centered wrapped labels; preserve dropdown policy.

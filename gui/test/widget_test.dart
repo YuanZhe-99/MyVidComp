@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:myapps_ui/myapps_ui.dart';
 import 'package:myvidcomp_gui/app_controller.dart';
 import 'package:myvidcomp_gui/app_localizations.dart';
 import 'package:myvidcomp_gui/app_settings.dart';
@@ -9,6 +10,7 @@ import 'package:myvidcomp_gui/core_ffi.dart';
 import 'package:myvidcomp_gui/formatting.dart';
 import 'package:myvidcomp_gui/main.dart';
 import 'package:myvidcomp_gui/media_tools.dart';
+import 'package:myvidcomp_gui/widgets.dart';
 
 /// A settings store that keeps everything in memory, so tests never touch the
 /// user's real profile.
@@ -284,7 +286,10 @@ void main() {
     ) async {
       await _pumpAt(tester, const Size(390, 844));
 
-      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('floatingNavBarIsland')),
+        findsOneWidget,
+      );
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.text('MyVidComp'), findsWidgets);
     });
@@ -298,14 +303,94 @@ void main() {
       expect(find.byType(NavigationBar), findsNothing);
     });
 
-    testWidgets('a desktop window opens the navigation rail out', (
+    testWidgets('Material 3 uses standard bottom navigation', (tester) async {
+      await _pumpAt(
+        tester,
+        const Size(390, 844),
+        controller: _testController(
+          settings: AppSettings.defaults.copyWith(uiStyle: 'material3'),
+        ),
+      );
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byKey(const ValueKey('floatingNavBarIsland')), findsNothing);
+    });
+
+    testWidgets('a desktop window uses the shared compact rail', (
       tester,
     ) async {
       await _pumpAt(tester, const Size(1400, 900));
 
       final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
-      expect(rail.extended, isTrue);
+      expect(rail.extended, isFalse);
     });
+
+    testWidgets('settings preserve advanced inputs across pane changes', (
+      tester,
+    ) async {
+      final controller = _testController();
+      await _pumpAt(tester, const Size(1400, 900), controller: controller);
+      final text = AppText.forCode('en');
+      await tester.tap(find.text(text.navSettings));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyAppsPaneBody), findsOneWidget);
+      await tester.tap(find.text(text.advanced));
+      await tester.pumpAndSettle();
+      final field = find.descendant(
+        of: find.byWidgetPredicate(
+          (widget) =>
+              widget is LabelledField && widget.label == text.workingFolder,
+        ),
+        matching: find.byType(TextField),
+      );
+      await tester.ensureVisible(field);
+      await tester.enterText(field, '/synthetic/work');
+      await tester.pumpAndSettle();
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpAndSettle();
+      expect(controller.settings.tmpDir, '/synthetic/work');
+      await _scrollTo(tester, find.text(text.advanced));
+      await _scrollTo(tester, field);
+      await tester.pumpAndSettle();
+      expect(find.text('/synthetic/work'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      tester.view.physicalSize = const Size(1400, 900);
+      await tester.pumpAndSettle();
+      expect(find.text('/synthetic/work'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    for (final language in const ['en', 'zh-Hans', 'zh-Hant', 'ja']) {
+      testWidgets('narrow settings fit large text in $language', (
+        tester,
+      ) async {
+        final controller = _testController(
+          settings: AppSettings.defaults.copyWith(language: language),
+        );
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await _pumpAt(tester, const Size(320, 900), controller: controller);
+        await tester.tap(find.byIcon(Icons.settings_outlined).last);
+        await tester.pumpAndSettle();
+        await _scrollTo(
+          tester,
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is MyAppsSettingsSegmentRow<String> &&
+                widget.title == AppText.forCode(language).appearance,
+          ),
+        );
+        await _scrollTo(
+          tester,
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is MyAppsSettingsSegmentRow<String> &&
+                widget.title == AppText.forCode(language).language,
+          ),
+        );
+        expect(find.byType(DropdownButtonFormField<String>), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    }
 
     testWidgets('the first screen offers a folder and a start button', (
       tester,

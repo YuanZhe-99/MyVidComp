@@ -3,6 +3,7 @@ import 'package:myapps_ui/myapps_ui.dart';
 
 /// A titled block of related settings.
 class SectionCard extends StatelessWidget {
+  // AI-FUNC-SUMMARY: Purpose: Bind a themed business section; Inputs: title, content and optional heading details; Returns: SectionCard; Side effects: None; Notes: shared headings own typography.
   const SectionCard({
     super.key,
     required this.title,
@@ -17,45 +18,22 @@ class SectionCard extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  // AI-FUNC-SUMMARY: Builds one titled block of settings; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render a business card with shared section styling; Inputs: context; Returns: Widget; Side effects: None; Notes: shapes and surfaces come from the shared theme.
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        padding: const EdgeInsets.all(16),
+        child: MyAppsSettingsSection(
+          title: title,
+          headingPadding: const EdgeInsets.only(bottom: 16),
           children: [
-            Row(
-              children: [
-                if (leading != null) ...[
-                  IconTheme(
-                    data: IconThemeData(color: theme.colorScheme.primary),
-                    child: leading!,
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: theme.textTheme.titleMedium),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+            if (leading != null || subtitle != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: leading,
+                subtitle: subtitle == null ? null : Text(subtitle!),
+              ),
             ...children,
           ],
         ),
@@ -87,7 +65,7 @@ class ChoiceField<T> extends StatelessWidget {
   final bool enabled;
 
   @override
-  // AI-FUNC-SUMMARY: Builds one labelled choice with an explanation of the selection; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render an inline choice with shared text-fit fallback; Inputs: context; Returns: Widget; Side effects: None; Notes: all option counts prefer segments, including narrow panes.
   Widget build(BuildContext context) {
     return MyAppsSettingsChoice<T>(
       label: label,
@@ -97,8 +75,8 @@ class ChoiceField<T> extends StatelessWidget {
       onChanged: onChanged,
       helpFor: helpFor,
       enabled: enabled,
-      segmentMinWidth: 340,
-      maxSegments: 3,
+      segmentMinWidth: 0,
+      maxSegments: values.length,
     );
   }
 }
@@ -127,7 +105,7 @@ class LabelledField extends StatelessWidget {
   final ValueChanged<String>? onChanged;
 
   @override
-  // AI-FUNC-SUMMARY: Builds one labelled text box; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render a text field using shared input styling; Inputs: context; Returns: Widget; Side effects: None; Notes: density and borders inherit the theme.
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
@@ -145,11 +123,7 @@ class LabelledField extends StatelessWidget {
                   enabled: enabled,
                   keyboardType: keyboardType,
                   onChanged: onChanged,
-                  decoration: InputDecoration(
-                    hintText: hint,
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
+                  decoration: InputDecoration(hintText: hint),
                 ),
               ),
               if (trailing != null) ...[const SizedBox(width: 8), trailing!],
@@ -257,37 +231,37 @@ class CountTile extends StatelessWidget {
   final bool emphasis;
 
   @override
-  // AI-FUNC-SUMMARY: Builds one captioned number; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render a themed summary card; Inputs: context; Returns: Widget; Side effects: None; Notes: shared theme owns card shape.
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: emphasis
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            value,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: emphasis ? theme.colorScheme.onPrimaryContainer : null,
+    return Card(
+      margin: EdgeInsets.zero,
+      color: emphasis
+          ? theme.colorScheme.primaryContainer
+          : theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              value,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: emphasis ? theme.colorScheme.onPrimaryContainer : null,
+              ),
             ),
-          ),
-          Text(
-            label,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: emphasis
-                  ? theme.colorScheme.onPrimaryContainer
-                  : theme.colorScheme.onSurfaceVariant,
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: emphasis
+                    ? theme.colorScheme.onPrimaryContainer
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -352,15 +326,12 @@ class PageBody extends StatelessWidget {
   final double maxWidth;
 
   @override
-  // AI-FUNC-SUMMARY: Builds a scrolling, width-limited page body; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Purpose: Render readable scrolling content with common spacing; Inputs: context; Returns: Widget; Side effects: None; Notes: parent SafeArea reserves floating navigation space.
   Widget build(BuildContext context) => Align(
     alignment: Alignment.topCenter,
     child: ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-        children: children,
-      ),
+      child: ListView(padding: const EdgeInsets.all(16), children: children),
     ),
   );
 }
