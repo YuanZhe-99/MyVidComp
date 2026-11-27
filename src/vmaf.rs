@@ -251,7 +251,101 @@ pub fn segmented_plan(duration_seconds: f64) -> Option<Vec<SegmentWindow>> {
     Some(windows)
 }
 
-// AI-FUNC-SUMMARY: Builds ffmpeg arguments for one seeked segmented VMAF window so decoding skips the rest of the file; returns the argument list; side effects: none.
+// AI-FUNC-SUMMARY: Parses keyframe timestamps from ffprobe CSV output; returns sorted unique non-negative timestamps; side effects: none.
+pub fn parse_keyframe_timestamps(text: &str) -> Vec<f64> {
+    let mut times: Vec<f64> = text
+        .lines()
+        .filter_map(|line| {
+            let token = line.split(',').next()?.trim();
+            let value = token.parse::<f64>().ok()?;
+            (value.is_finite() && value >= 0.0).then_some(value)
+        })
+        .collect();
+    times.sort_by(|a, b| a.total_cmp(b));
+    times.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+    times
+}
+
+// AI-FUNC-SUMMARY: Probes decoded keyframe timestamps from a video file using ffprobe without full decoding; returns sorted timestamps or empty on failure; side effects: spawns ffprobe.
+pub fn probe_keyframes(ffprobe: &str, path: &Path) -> Vec<f64> {
+    let output = process_command(ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-skip_frame",
+            "nokey",
+            "-show_entries",
+            "frame=pts_time",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_keyframe_timestamps(&String::from_utf8_lossy(&output.stdout))
+}
+
+// AI-FUNC-SUMMARY: Snaps planned segment windows onto exact keyframes of the distorted file and deduplicates close hits; returns aligned windows; side effects: none.
+pub fn align_windows_to_keyframes(
+    windows: &[SegmentWindow],
+    keyframes: &[f64],
+    duration_seconds: f64,
+) -> Vec<SegmentWindow> {
+    if keyframes.is_empty() {
+        return windows.to_vec();
+    }
+
+    let mut aligned: Vec<SegmentWindow> = Vec::with_capacity(windows.len());
+    for window in windows {
+        let snapped = keyframes
+            .iter()
+            .copied()
+            .filter(|&k| k + window.duration_seconds <= duration_seconds + 0.5)
+            .min_by(|a, b| {
+                (a - window.start_seconds)
+                    .abs()
+                    .total_cmp(&(b - window.start_seconds).abs())
+            })
+            .or_else(|| {
+                keyframes
+                    .iter()
+                    .copied()
+                    .filter(|&k| k <= window.start_seconds)
+                    .max_by(|a, b| a.total_cmp(b))
+            })
+            .unwrap_or(window.start_seconds);
+
+        if aligned
+            .last()
+            .is_some_and(|prev| (snapped - prev.start_seconds).abs() < 1.0)
+        {
+            continue;
+        }
+        aligned.push(SegmentWindow {
+            start_seconds: snapped,
+            duration_seconds: window.duration_seconds,
+        });
+    }
+
+    if aligned.is_empty() {
+        windows.to_vec()
+    } else {
+        aligned
+    }
+}
+
+// AI-FUNC-SUMMARY: Builds ffmpeg arguments for one seeked segmented VMAF window using keyframe seek on distorted input and hybrid seek+trim on reference input; returns the argument list; side effects: none.
 pub fn build_segmented_vmaf_args(
     distorted: &Path,
     reference: &Path,
@@ -271,10 +365,14 @@ pub fn build_segmented_vmaf_args(
         options.threads
     };
     let subsample = options.subsample.max(1);
+    let lead = 5.0_f64;
+    let ref_coarse = (window.start_seconds - lead).max(0.0);
+    let ref_trim_start = (window.start_seconds - ref_coarse).max(0.0);
+    let duration = format!("{:.3}", window.duration_seconds);
 
     let filter = format!(
         "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[dist];\
-         [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
+         [1:v:0]trim=start={ref_trim_start:.3}:duration={duration},settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
          [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest"
     );
 
@@ -288,22 +386,32 @@ pub fn build_segmented_vmaf_args(
     if progress {
         args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
     }
-    let start = format!("{:.3}", window.start_seconds);
-    let duration = format!("{:.3}", window.duration_seconds);
-    for (path, method) in [(distorted, accel.0), (reference, accel.1)] {
-        if let Some(method) = method {
-            args.push("-hwaccel".to_string());
-            args.push(method.as_str().to_string());
-        }
-        args.extend([
-            "-ss".to_string(),
-            start.clone(),
-            "-t".to_string(),
-            duration.clone(),
-            "-i".to_string(),
-            path.to_string_lossy().to_string(),
-        ]);
+
+    if let Some(method) = accel.0 {
+        args.push("-hwaccel".to_string());
+        args.push(method.as_str().to_string());
     }
+    args.extend([
+        "-ss".to_string(),
+        format!("{:.3}", window.start_seconds),
+        "-t".to_string(),
+        duration.clone(),
+        "-i".to_string(),
+        distorted.to_string_lossy().to_string(),
+    ]);
+
+    if let Some(method) = accel.1 {
+        args.push("-hwaccel".to_string());
+        args.push(method.as_str().to_string());
+    }
+    args.extend([
+        "-ss".to_string(),
+        format!("{ref_coarse:.3}"),
+        "-t".to_string(),
+        format!("{:.3}", ref_trim_start + window.duration_seconds + 1.0),
+        "-i".to_string(),
+        reference.to_string_lossy().to_string(),
+    ]);
 
     args.extend([
         "-lavfi".to_string(),
@@ -315,7 +423,7 @@ pub fn build_segmented_vmaf_args(
     args
 }
 
-// AI-FUNC-SUMMARY: Builds ffmpeg arguments to measure perceptual quality with the fast built-in xpsnr filter; returns the argument list; side effects: none.
+// AI-FUNC-SUMMARY: Builds ffmpeg arguments to measure perceptual quality with the fast built-in xpsnr filter, applying 10-bit portrait transpose guard and hybrid reference alignment when windowed; returns the argument list; side effects: none.
 pub fn build_xpsnr_args(
     distorted: &Path,
     reference: &Path,
@@ -325,11 +433,9 @@ pub fn build_xpsnr_args(
     accel: (Option<HwAccel>, Option<HwAccel>),
 ) -> Vec<String> {
     let format = comparison_pixel_format(video);
-    let filter = format!(
-        "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[dist];\
-         [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
-         [dist][ref]xpsnr"
-    );
+    let portrait_guard =
+        video.height > video.width && pixel_format_bit_depth(format).unwrap_or(8) > 8;
+    let transpose = if portrait_guard { ",transpose=1" } else { "" };
 
     let mut args = vec![
         "-hide_banner".to_string(),
@@ -341,21 +447,59 @@ pub fn build_xpsnr_args(
     if progress {
         args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
     }
-    for (path, method) in [(distorted, accel.0), (reference, accel.1)] {
-        if let Some(method) = method {
+
+    let filter = if let Some(window) = window {
+        let lead = 5.0_f64;
+        let ref_coarse = (window.start_seconds - lead).max(0.0);
+        let ref_trim_start = (window.start_seconds - ref_coarse).max(0.0);
+        let duration = format!("{:.3}", window.duration_seconds);
+
+        if let Some(method) = accel.0 {
             args.push("-hwaccel".to_string());
             args.push(method.as_str().to_string());
         }
-        if let Some(window) = window {
-            args.extend([
-                "-ss".to_string(),
-                format!("{:.3}", window.start_seconds),
-                "-t".to_string(),
-                format!("{:.3}", window.duration_seconds),
-            ]);
+        args.extend([
+            "-ss".to_string(),
+            format!("{:.3}", window.start_seconds),
+            "-t".to_string(),
+            duration.clone(),
+            "-i".to_string(),
+            distorted.to_string_lossy().to_string(),
+        ]);
+
+        if let Some(method) = accel.1 {
+            args.push("-hwaccel".to_string());
+            args.push(method.as_str().to_string());
         }
-        args.extend(["-i".to_string(), path.to_string_lossy().to_string()]);
-    }
+        args.extend([
+            "-ss".to_string(),
+            format!("{ref_coarse:.3}"),
+            "-t".to_string(),
+            format!("{:.3}", ref_trim_start + window.duration_seconds + 1.0),
+            "-i".to_string(),
+            reference.to_string_lossy().to_string(),
+        ]);
+
+        format!(
+            "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}{transpose}[dist];\
+             [1:v:0]trim=start={ref_trim_start:.3}:duration={duration},settb=AVTB,setpts=PTS-STARTPTS,format={format}{transpose}[ref];\
+             [dist][ref]xpsnr"
+        )
+    } else {
+        for (path, method) in [(distorted, accel.0), (reference, accel.1)] {
+            if let Some(method) = method {
+                args.push("-hwaccel".to_string());
+                args.push(method.as_str().to_string());
+            }
+            args.extend(["-i".to_string(), path.to_string_lossy().to_string()]);
+        }
+
+        format!(
+            "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}{transpose}[dist];\
+             [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}{transpose}[ref];\
+             [dist][ref]xpsnr"
+        )
+    };
 
     args.extend([
         "-lavfi".to_string(),
@@ -893,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    // AI-FUNC-SUMMARY: Verifies segmented VMAF and XPSNR commands put seek flags before each input; returns nothing; side effects: none.
+    // AI-FUNC-SUMMARY: Verifies segmented VMAF and XPSNR commands put hybrid seek flags, trim alignment, and 10-bit portrait guards cleanly; returns nothing; side effects: none.
     fn builds_segmented_and_xpsnr_commands() {
         let win = SegmentWindow {
             start_seconds: 120.0,
@@ -904,16 +1048,20 @@ mod tests {
             Path::new("/videos/in.mp4"),
             &video(1920, 1080, "yuv420p"),
             VmafOptions {
-                subsample: 2,
+                subsample: 3,
                 threads: 4,
             },
             win,
             false,
             (None, None),
         );
+        let vmaf_joined = vmaf_args.join(" ");
         assert_eq!(vmaf_args.iter().filter(|a| *a == "-ss").count(), 2);
         assert_eq!(vmaf_args.iter().filter(|a| *a == "-t").count(), 2);
-        assert!(vmaf_args.join(" ").contains("n_subsample=2"));
+        assert!(vmaf_joined.contains("-ss 120.000 -t 6.000 -i /tmp/out.mp4"));
+        assert!(vmaf_joined.contains("-ss 115.000 -t 12.000 -i /videos/in.mp4"));
+        assert!(vmaf_joined.contains("trim=start=5.000:duration=6.000"));
+        assert!(vmaf_joined.contains("n_subsample=3"));
 
         let xpsnr_args = build_xpsnr_args(
             Path::new("/tmp/out.mp4"),
@@ -924,9 +1072,50 @@ mod tests {
             (None, None),
         );
         let joined = xpsnr_args.join(" ");
-        assert!(joined.contains("format=yuv420p10le"));
+        assert!(joined.contains("format=yuv420p10le[dist]"));
+        assert!(!joined.contains("transpose=1"));
+        assert!(joined.contains("trim=start=5.000:duration=6.000"));
         assert!(joined.contains("[dist][ref]xpsnr"));
         assert!(joined.contains("-progress pipe:1"));
+
+        let portrait_xpsnr = build_xpsnr_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/in.mp4"),
+            &video(1080, 1920, "yuv420p10le"),
+            None,
+            false,
+            (None, None),
+        );
+        let portrait_joined = portrait_xpsnr.join(" ");
+        assert!(portrait_joined.contains("format=yuv420p10le,transpose=1[dist]"));
+        assert!(portrait_joined.contains("format=yuv420p10le,transpose=1[ref]"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies keyframe CSV parsing and segment window alignment to distorted keyframes; returns nothing; side effects: none.
+    fn parses_and_aligns_keyframes() {
+        let parsed = parse_keyframe_timestamps("12.500\n0.000,\nN/A\n5.000\n5.00001\n-1.0\n");
+        assert_eq!(parsed, vec![0.0, 5.0, 12.5]);
+
+        let windows = vec![
+            SegmentWindow {
+                start_seconds: 10.0,
+                duration_seconds: 6.0,
+            },
+            SegmentWindow {
+                start_seconds: 12.3,
+                duration_seconds: 6.0,
+            },
+            SegmentWindow {
+                start_seconds: 50.0,
+                duration_seconds: 6.0,
+            },
+        ];
+        let aligned = align_windows_to_keyframes(&windows, &[0.0, 11.8, 48.0, 96.0], 100.0);
+        assert_eq!(aligned.len(), 2);
+        assert!((aligned[0].start_seconds - 11.8).abs() < 1e-6);
+        assert!((aligned[1].start_seconds - 48.0).abs() < 1e-6);
+        assert_eq!(align_windows_to_keyframes(&windows, &[], 100.0), windows);
     }
 
     #[test]

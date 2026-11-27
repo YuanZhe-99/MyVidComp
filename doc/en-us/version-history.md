@@ -1,5 +1,17 @@
 # Version history
 
+## 0.4.1 — Windows startup crash fix and P0 quality accuracy fixes
+
+Fixed the `flutter_windows.dll` access violation (`0xc0000005` in
+`AccessibilityBridge::CreateRemoveReparentedNodesUpdate`, `flutter/flutter#175041`) triggered on
+Windows systems after startup by wrapping `HomeShell` in `ExcludeSemantics` on Windows, keeping the
+initial tool-check slot stable until probing finishes, deduplicating encoder-list updates, clamping
+slider bounds, and writing uncaught GUI errors to `app.log` in the user profile folder. Added P0
+quality-measurement accuracy fixes: 10-bit portrait `transpose=1` guard for `xpsnr`, cross-codec
+keyframe alignment (`probe_keyframes` + hybrid reference `trim`) for segmented checks, and odd
+subsampling (`3` for `segmented`, `5` for search trials) to avoid B-frame phase-locking. CLI `0.4.1`
+and GUI `0.4.1+17`.
+
 ## 0.4.0 — Faster quality checks, flexible policies and review comparison
 
 Tier A quality measurement speedups (`segmented` default check across six 6-second windows with

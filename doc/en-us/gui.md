@@ -63,6 +63,10 @@ distinct from its wire value in every language.
 - Every `ffmpeg` and `ffprobe` process the engine starts goes through the shared constructor, so
   Windows never flashes a console window. The interface must not reintroduce a direct `-version`
   check for the same reason: on Windows it checks the file exists instead of running it.
+- On Windows, the root shell wraps `HomeShell` in `ExcludeSemantics` to guard against the upstream
+  `flutter_windows.dll` accessibility-bridge crash (`flutter/flutter#175041`), initial tool detection
+  starts in `checking` state so the startup layout stays stable, and uncaught Flutter/platform errors
+  are appended to `app.log` in the user's profile folder.
 
 ## Interface style
 

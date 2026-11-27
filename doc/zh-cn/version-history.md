@@ -1,5 +1,14 @@
 # 版本历史
 
+## 0.4.1 — Windows 启动闪退修复与 P0 画质测算精度加固
+
+修复部分 Windows 机器在进入主页后于 `flutter_windows.dll`（`AccessibilityBridge::CreateRemoveReparentedNodesUpdate`，
+`flutter/flutter#175041`）触发的 `0xc0000005` 闪退：在 Windows 上以 `ExcludeSemantics` 包裹根界面、
+保持启动期工具检测占位稳定、对编码器列表变更去重、约束滑块边界，并将未捕获异常写入配置目录下的
+`app.log`。同步落地 P0 画质测算精度修复：为 `xpsnr` 增加 10 位竖屏 `transpose=1` 防护、分段检测
+采用基于成品关键帧的两段混合对齐（`probe_keyframes` + 源流 `trim`），以及改用奇数跳帧（`segmented`
+为 `3`，搜索试编码为 `5`）避免与层次化 B 帧产生相位锁定。CLI `0.4.1` 与 GUI `0.4.1+17`。
+
 ## 0.4.0 — 更快的画质检测、更灵活的策略与复核对比试看
 
 Tier A 画质检测提速（默认采用最多 6 个 6 秒窗口且 2 倍跳帧的 `segmented` 分段检测、12 秒 2 倍跳帧

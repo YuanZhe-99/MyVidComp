@@ -8,7 +8,7 @@ GUI theme facade: [shared UI](../shared-ui.md) documents `gui/lib/app_theme.dart
 style-name parsing, branded shared-theme construction, light/dark methods and exports.
 The Rust declaration totals below are unaffected by this extraction.
 
-Total documented declarations in `src/`: **452**.
+Total documented declarations in `src/`: **455**.
 
 Every declaration carries an `AI-FUNC-SUMMARY` comment in the source, and every one of those
 appears on exactly one page below. The pages that mirror a module are the module; the pages that
@@ -19,7 +19,7 @@ itself is one file.
 |---|---|---|
 | [options.md](options.md) | `src/options.rs` | 52 |
 | [codecs.md](codecs.md) | `src/codec.rs` | 12 |
-| [quality.md](quality.md) | `src/vmaf.rs`, `src/search.rs` | 37 |
+| [quality.md](quality.md) | `src/vmaf.rs`, `src/search.rs` | 40 |
 | [review.md](review.md) | `src/review.rs` | 23 |
 | [preview.md](preview.md) | `src/preview.rs` | 14 |
 | [ffi-abi.md](ffi-abi.md) | `src/ffi.rs` | 32 |

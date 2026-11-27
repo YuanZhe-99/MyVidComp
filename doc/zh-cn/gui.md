@@ -57,6 +57,10 @@
 - 引擎启动的每个 `ffmpeg` 和 `ffprobe` 进程都走共享的构造器，因此 Windows 上绝不会闪出命令行窗口。
   界面出于同样的原因不得重新引入直接的 `-version` 检查：在 Windows 上它改为检查文件是否存在，而不是
   运行它。
+- 在 Windows 上，根界面将 `HomeShell` 包裹在 `ExcludeSemantics` 中以规避上游
+  `flutter_windows.dll` 无障碍桥崩溃（`flutter/flutter#175041`），启动时的工具检测初始状态为
+  `checking` 以保持首屏布局稳定，同时未捕获的 Flutter 与平台异常会追加记录到用户配置目录的
+  `app.log` 中。
 
 ## 界面风格
 

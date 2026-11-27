@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:myapps_ui/myapps_ui.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -10,8 +13,61 @@ import 'pages/progress_page.dart';
 import 'pages/review_page.dart';
 import 'pages/settings_page.dart';
 
-// AI-FUNC-SUMMARY: Starts the application; returns none; side effects: builds the widget tree.
+// AI-FUNC-SUMMARY: Appends a timestamped error or startup line to the profile app.log; returns none; side effects: writes app.log silently if writable.
+void _appendAppLog(String message) {
+  try {
+    final sep = Platform.pathSeparator;
+    Directory? dir;
+    if (Platform.isWindows) {
+      final appData = Platform.environment['APPDATA'];
+      if (appData != null && appData.isNotEmpty) {
+        dir = Directory('$appData${sep}MyVidComp');
+      }
+    } else {
+      final home =
+          Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+      if (home != null && home.isNotEmpty) {
+        dir = Platform.isMacOS
+            ? Directory(
+                '$home${sep}Library${sep}Application Support${sep}MyVidComp',
+              )
+            : Directory('$home$sep.config${sep}myvidcomp');
+      }
+    }
+    if (dir == null) {
+      return;
+    }
+    dir.createSync(recursive: true);
+    final file = File('${dir.path}${sep}app.log');
+    if (file.existsSync() && file.lengthSync() > 262144) {
+      file.writeAsStringSync('');
+    }
+    final stamp = DateTime.now().toIso8601String();
+    file.writeAsStringSync('[$stamp] $message\n', mode: FileMode.append);
+  } catch (_) {
+    // Logging must never crash the application.
+  }
+}
+
+// AI-FUNC-SUMMARY: Starts the application with uncaught error logging; returns none; side effects: initializes bindings, logs startup, builds the widget tree.
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  _appendAppLog('MyVidComp starting on ${Platform.operatingSystem}');
+  final previousOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    _appendAppLog(
+      'FlutterError: ${details.exceptionAsString()}\n${details.stack ?? ''}',
+    );
+    if (previousOnError != null) {
+      previousOnError(details);
+    } else {
+      FlutterError.presentError(details);
+    }
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _appendAppLog('Uncaught error: $error\n$stack');
+    return false;
+  };
   runApp(const MyVidCompApp());
 }
 
@@ -79,7 +135,13 @@ class _MyVidCompAppState extends State<MyVidCompApp> {
       },
       theme: AppTheme.light(style),
       darkTheme: AppTheme.dark(style),
-      home: HomeShell(controller: _controller),
+      // Work around flutter/flutter#175041 on Windows where reparenting or
+      // inserting widgets during async startup triggers a null-parent access
+      // violation in AccessibilityBridge::CreateRemoveReparentedNodesUpdate.
+      home: ExcludeSemantics(
+        excluding: Platform.isWindows,
+        child: HomeShell(controller: _controller),
+      ),
     );
   }
 }

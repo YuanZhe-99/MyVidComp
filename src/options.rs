@@ -224,7 +224,7 @@ impl QualityCheck {
     pub fn subsample(&self) -> u32 {
         match self {
             QualityCheck::Full => 1,
-            QualityCheck::Segmented => 2,
+            QualityCheck::Segmented => 3,
             QualityCheck::Sampled | QualityCheck::Off => 5,
         }
     }
@@ -807,7 +807,7 @@ mod decoder_tests {
             Ok(QualityCheck::Segmented)
         );
         assert_eq!(parse_quality_check("spot"), Ok(QualityCheck::Segmented));
-        assert_eq!(QualityCheck::Segmented.subsample(), 2);
+        assert_eq!(QualityCheck::Segmented.subsample(), 3);
 
         assert_eq!(parse_quality_mode("fixed"), Ok(QualityMode::Fixed));
         assert_eq!(parse_quality_metric("vmaf"), Ok(QualityMetric::Vmaf));

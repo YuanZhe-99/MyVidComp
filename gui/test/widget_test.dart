@@ -46,6 +46,7 @@ class _EmptyReviewStore implements ReviewStore {
 AppController _testController({
   AppSettings settings = AppSettings.defaults,
   bool toolsReady = true,
+  bool toolsChecking = false,
 }) => AppController(
   settingsStore: _MemorySettingsStore(settings),
   reviewStore: const _EmptyReviewStore(),
@@ -56,7 +57,12 @@ AppController _testController({
               ffmpeg: MediaTool(state: ToolState.found, path: 'ffmpeg'),
               ffprobe: MediaTool(state: ToolState.found, path: 'ffprobe'),
             )
-          : const MediaTools.unknown(),
+          : toolsChecking
+          ? const MediaTools.unknown()
+          : const MediaTools(
+              ffmpeg: MediaTool.missing(),
+              ffprobe: MediaTool.missing(),
+            ),
 );
 
 // AI-FUNC-SUMMARY: Renders the app at one window size; returns when it has settled; side effects: sets the test view size.
@@ -521,6 +527,21 @@ void main() {
         find.widgetWithText(FilledButton, text.start),
       );
       expect(button.onPressed, isNull);
+    });
+
+    testWidgets('missing tools banner stays hidden while checking tools', (
+      tester,
+    ) async {
+      final controller = _testController(
+        settings: AppSettings.defaults.copyWith(targetFolder: '/videos'),
+        toolsReady: false,
+        toolsChecking: true,
+      );
+      await _pumpAt(tester, const Size(1000, 900), controller: controller);
+      final text = AppText.forCode('en');
+
+      expect(controller.tools.isChecking, isTrue);
+      expect(find.text(text.readyToolsMissing), findsNothing);
     });
 
     testWidgets('the review screen says so when nothing needs a decision', (

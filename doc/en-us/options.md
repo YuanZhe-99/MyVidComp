@@ -45,7 +45,7 @@ the trials would cost more than the conversion.
 
 | Wire value | Shown as | Meaning |
 |---|---|---|
-| `segmented` (default) | Segmented check | Compares up to six 6-second windows across files 60 s or longer (2x frame subsample). |
+| `segmented` (default) | Segmented check | Compares up to six keyframe-aligned 6-second windows across files 60 s or longer (3x odd frame subsample). |
 | `sampled` | Spot check | Compares one frame in five across the whole file. |
 | `full` | Every frame | Compares every frame. Slowest and most accurate. |
 | `off` | Skip | No comparison. |

@@ -297,7 +297,7 @@ class _ReviewMargin extends StatelessWidget {
           const SizedBox(height: 4),
           Text(formatScore(threshold), style: theme.textTheme.headlineSmall),
           Slider(
-            value: settings.reviewMargin.toDouble(),
+            value: settings.reviewMargin.toDouble().clamp(0, 1000),
             min: 0,
             max: 1000,
             divisions: 20,

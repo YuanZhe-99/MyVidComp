@@ -34,8 +34,11 @@ Described for readers in [../quality.md](../quality.md).
 | `can_score_on_gpu` | function | Checks whether a video uses 8-bit 4:2:0 pixel format suitable for CUDA VMAF scoring, returning a boolean. |
 | `build_vmaf_cuda_args` | function | Builds FFmpeg arguments for CUDA-resident `libvmaf_cuda` comparison, returning the argument list. |
 | `segmented_plan` | function | Computes up to six 6-second comparison windows across files 60 s or longer, returning segment windows or none for short files. |
-| `build_segmented_vmaf_args` | function | Builds FFmpeg arguments concatenating pre-input seek windows for fast `libvmaf` scoring, returning the argument list. |
-| `build_xpsnr_args` | function | Builds FFmpeg arguments comparing two streams using the fast CPU `xpsnr` filter, returning the argument list. |
+| `parse_keyframe_timestamps` | function | Parses `ffprobe` CSV keyframe timestamps, returning sorted deduplicated seconds. |
+| `probe_keyframes` | function | Probes decoded keyframe timestamps from a video without decoding full frames, returning sorted seconds. |
+| `align_windows_to_keyframes` | function | Snaps planned segment windows onto exact keyframes of the distorted output and drops near duplicates, returning aligned windows. |
+| `build_segmented_vmaf_args` | function | Builds FFmpeg arguments using distorted keyframe seek plus two-stage hybrid seek+trim alignment on the reference for fast `libvmaf` scoring, returning the argument list. |
+| `build_xpsnr_args` | function | Builds FFmpeg arguments comparing two streams using the fast CPU `xpsnr` filter with 10-bit portrait `transpose=1` protection and hybrid windowed alignment, returning the argument list. |
 | `parse_xpsnr_score` | function | Parses the weighted XPSNR decibel value from FFmpeg output and converts it onto the 0–10000 scale, returning hundredths or none. |
 | `xpsnr_score_from_output` | function | Reads a completed XPSNR run result, returning a `VmafScore` wrapper or a failure message. |
 | `extract_xpsnr_channel` | function | Parses a single named XPSNR channel (`y`, `u`, or `v`) from an output summary line, returning decibels or none. |

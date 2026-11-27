@@ -123,8 +123,9 @@ class _ConvertPageState extends State<ConvertPage> {
 
     return PageBody(
       children: [
-        if (!controller.tools.areReady)
-          _MissingToolsBanner(onFix: widget.onOpenSettings),
+        (!controller.tools.areReady && !controller.tools.isChecking)
+            ? _MissingToolsBanner(onFix: widget.onOpenSettings)
+            : const SizedBox.shrink(),
         SectionCard(
           title: text.folderTitle,
           subtitle: text.folderHint,

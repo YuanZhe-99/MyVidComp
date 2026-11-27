@@ -385,10 +385,10 @@ pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result
             return Err(format!("trial encode failed: {detail}"));
         }
 
-        // Trials sample every second frame: short clips with subsample=2 match
-        // full-frame scores within ~0.1 VMAF while cutting search time in half.
+        // Trials use odd subsampling (5): odd steps avoid phase-locking with
+        // hierarchical B-frame QP cycles while cutting trial VMAF cost by 5x.
         let options = VmafOptions {
-            subsample: 2,
+            subsample: 5,
             threads: 0,
         };
         // Trials stay on the processor: a sample is twelve seconds, and creating
@@ -407,7 +407,7 @@ pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result
         let _ = fs::remove_file(&encoded);
 
         let score = measurement.and_then(|measurement| {
-            vmaf::score_from_output(measurement.status.success(), &measurement.stderr, 2)
+            vmaf::score_from_output(measurement.status.success(), &measurement.stderr, 5)
         });
         if let Ok(score) = score {
             total += u64::from(score.hundredths);

@@ -242,8 +242,10 @@ class AppController extends ChangeNotifier {
         _tools.ffmpeg.path,
         _settings.codec,
       );
-      _availableEncoders = List.unmodifiable(list);
-      notifyListeners();
+      if (!listEquals(_availableEncoders, list)) {
+        _availableEncoders = List.unmodifiable(list);
+        notifyListeners();
+      }
     } catch (_) {
       // Missing/unusable native library in tests or older installs stays non-fatal.
     }

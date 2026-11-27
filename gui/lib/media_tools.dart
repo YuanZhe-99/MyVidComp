@@ -9,6 +9,8 @@ enum ToolState { checking, found, missing }
 class MediaTool {
   const MediaTool({required this.state, required this.path});
 
+  const MediaTool.checking() : state = ToolState.checking, path = '';
+
   const MediaTool.missing() : state = ToolState.missing, path = '';
 
   final ToolState state;
@@ -22,13 +24,16 @@ class MediaTools {
   const MediaTools({required this.ffmpeg, required this.ffprobe});
 
   const MediaTools.unknown()
-    : ffmpeg = const MediaTool.missing(),
-      ffprobe = const MediaTool.missing();
+    : ffmpeg = const MediaTool.checking(),
+      ffprobe = const MediaTool.checking();
 
   final MediaTool ffmpeg;
   final MediaTool ffprobe;
 
   bool get areReady => ffmpeg.isReady && ffprobe.isReady;
+
+  bool get isChecking =>
+      ffmpeg.state == ToolState.checking || ffprobe.state == ToolState.checking;
 
   // AI-FUNC-SUMMARY: Finds the FFmpeg tools, preferring anything the user chose; returns what was found; side effects: reads the filesystem and, off Windows, runs each tool once.
   static Future<MediaTools> detect({

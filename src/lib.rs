@@ -4315,7 +4315,11 @@ fn measure_quality_with_progress(
             && options.preservation == Preservation::Flexible);
     let windows = use_segmented
         .then(|| vmaf::segmented_plan(item.video.duration_seconds))
-        .flatten();
+        .flatten()
+        .map(|planned| {
+            let keyframes = vmaf::probe_keyframes(&options.ffprobe, &item.temp_path);
+            vmaf::align_windows_to_keyframes(&planned, &keyframes, item.video.duration_seconds)
+        });
 
     let metric = match options.quality_metric {
         QualityMetric::Vmaf => QualityMetric::Vmaf,

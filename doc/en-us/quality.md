@@ -38,12 +38,18 @@ Three things are done to every comparison:
   The two files are decoded separately, because they are in different codecs and
   hardware that reads one may refuse the other, and the decoded frames are
   brought back into ordinary memory for the filter.
+- When scoring 10-bit portrait sources (`height > width`) with `xpsnr`, both
+  inputs receive `transpose=1` before `xpsnr` to avoid an upstream FFmpeg
+  `vf_xpsnr` 10-bit portrait stride bug.
 
 For whole-file checks (`sampled` / `full`), the check runs once across the stream.
 For the default `segmented` check on files 60 seconds or longer, up to six
-6-second windows spaced evenly across the body of the video (2x subsampling)
-are decoded directly with pre-input `-ss` / `-t` seeking and scored cleanly in
-a fraction of the time.
+6-second windows spaced evenly across the body of the video (`n_subsample=3`,
+odd subsampling to avoid hierarchical B-frame phase-locking) are snapped to the
+converted file's keyframes via `ffprobe`; the converted stream uses a fast `-ss`
+seek while the reference stream uses a two-stage hybrid seek (`-ss` 5 s earlier
+plus `trim=start=...:duration=...`) so cross-codec GOP differences never shift
+frames out of alignment.
 
 The model is chosen by resolution: the 4K model above 1440p, the standard model
 below it.
@@ -69,8 +75,9 @@ the middle of the file, away from titles and credits. One sample per twelve
 minutes, twelve seconds each, at most six.
 
 Each trial encodes every sample at one setting and measures the result with
-`n_subsample=2` for speed, then interpolates towards the setting that lands just
-above the target (seeded by an initial estimate when available). The search
+`n_subsample=5` (odd subsampling avoids B-frame phase-locking while cutting trial
+scoring cost), then interpolates towards the setting that lands just above the
+target (seeded by an initial estimate when available). The search
 stops when the bracket closes to one step, when a setting repeats, or after
 six trials. The chosen setting is the largest passing value, which is the
 smallest file that still reaches the target.
@@ -115,10 +122,10 @@ never skips the check.
 
 Measurement is not free. Comparing every frame of a 1080p file takes about as
 long as encoding it; 4K is several times worse. `segmented` (the default) seeks
-to up to six 6-second windows across files 60 s or longer with `n_subsample=2`,
-keeping CPU measurement bounded to seconds even on long 4K inputs. `sampled`
-compares one frame in five across the full stream, and `--quality-metric xpsnr`
-(or `auto`) replaces or screens slow `libvmaf` passes. A tuning search adds a
+to up to six 6-second keyframe-aligned windows across files 60 s or longer with
+`n_subsample=3`, keeping CPU measurement bounded to seconds even on long 4K
+inputs. `sampled` compares one frame in five across the full stream, and
+`--quality-metric xpsnr` (or `auto`) replaces or screens slow `libvmaf` passes. A tuning search adds a
 handful of short 12-second sample encodes on top of that.
 
 ## Reading the video

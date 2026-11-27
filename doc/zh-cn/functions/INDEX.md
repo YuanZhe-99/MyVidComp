@@ -8,7 +8,7 @@ SectionCard、LabelledField、CountTile 和 PageBody 继承共享展示规范。
 风格名称解析、带品牌色的共享主题构造、明暗主题方法及公共导出。
 本次抽取不改变下方 Rust 声明总数。
 
-`src/` 中已记录的声明总数：**452**。
+`src/` 中已记录的声明总数：**455**。
 
 源码中每个声明都带有 `AI-FUNC-SUMMARY` 注释，其中每一条都恰好出现在下面某一个页面上。与模块一一
 对应的页面就是那个模块；拆分 `src/lib.rs` 的那些页面按代码所属的流水线阶段分组，因为流水线本身就
@@ -18,7 +18,7 @@ SectionCard、LabelledField、CountTile 和 PageBody 继承共享展示规范。
 |---|---|---|
 | [options.md](options.md) | `src/options.rs` | 52 |
 | [codecs.md](codecs.md) | `src/codec.rs` | 12 |
-| [quality.md](quality.md) | `src/vmaf.rs`、`src/search.rs` | 37 |
+| [quality.md](quality.md) | `src/vmaf.rs`、`src/search.rs` | 40 |
 | [review.md](review.md) | `src/review.rs` | 23 |
 | [preview.md](preview.md) | `src/preview.rs` | 14 |
 | [ffi-abi.md](ffi-abi.md) | `src/ffi.rs` | 32 |
