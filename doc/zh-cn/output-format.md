@@ -1,13 +1,15 @@
 # 输出格式与容器选择
 
-`OutputFormat` 策略是类型化的容器策略边界。MyVidComp 默认输出 AV1 MP4，除非用户选择保守的 MKV 回退，否则绝不离开 MP4 路径。
+`OutputFormat` 策略是类型化的容器策略边界。MyVidComp 默认输出 AV1 MP4，除非用户选择 `mkv`、`keep` 或保守的 `mkv-fallback`，否则绝不离开 MP4 路径。
 
-## 两种格式
+## 四种格式
 
 | 格式 | 线值 | 行为 |
 |---|---|---|
-| 严格 MP4（默认） | `mp4` | 映射的非主流水流位于保守 MP4 复制白名单之外时，以具体原因跳过该文件。 |
-| MP4 + MKV 回退 | `mkv-fallback` | 对这类文件，仅当每个映射的非主流水流类型都保守地兼容 Matroska 复制时，将输出容器切换为 MKV。 |
+| 严格 MP4（默认） | `mp4` | 映射的非主流位于保守 MP4 复制白名单之外时（除非启用音频转码），以具体原因跳过该文件。 |
+| MP4 + MKV 回退 | `mkv-fallback` | 对这类文件，仅当每个映射的非主流类型都保守地兼容 Matroska 复制时，将输出容器切换为 MKV。 |
+| 始终 MKV | `mkv` | 所有兼容 Matroska 的已转换文件一律写入 Matroska（`.mkv`）。 |
+| 保持原容器 | `keep` | 原文件为 `.mkv` 时使用 `.mkv`，其余情况使用 `.mp4`（并受严格 MP4 兼容性检查约束）。 |
 
 选择发生在**已确认的 QuickTime 章节承载轨被排除出映射流集合之后**，因此章节承载轨绝不触发 MKV 回退——此类文件保持 MP4。
 
@@ -45,10 +47,10 @@ Matroska 能力并不证明任意流可被安全复制：任意数据、附件�
 
 ## 选择入口
 
-- CLI：`--output-format mp4|mkv-fallback`
+- CLI：`--output-format mp4|mkv|mkv-fallback|keep`（可搭配 `--audio-policy copy|transcode-incompatible` 与 `--output-dir PATH`）
 - 配置：`output_format`（包模板中为兼容旧构建而注释）
 - 嵌入 API：`RunOptions.output_format`
 - GUI：本地化的输出格式选择器，持久化于 GUI 设置（schema v3+）
-- 嵌入 ABI：`FfiRunOptionsV1` 的 `output_format` 字段（空值映射为 `mp4`）
+- 嵌入 ABI：`FfiRunOptionsV1` 的 `output_format` 字段（嵌入在 V2 与 V3 之中；空值映射为 `mp4`）
 
 所选格式通过 `output_format_selected` 事件和终端"Output format"行上报。

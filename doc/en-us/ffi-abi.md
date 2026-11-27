@@ -9,14 +9,18 @@ existing one.
 | Version | Struct | Entry point |
 |---|---|---|
 | 1 | `FfiRunOptionsV1` (by pointer) | `myvidcomp_run_blocking_v1` |
-| 2 (current) | `FfiRunOptionsV2` (by pointer) | `myvidcomp_run_blocking_v2` |
+| 2 | `FfiRunOptionsV2` (by pointer) | `myvidcomp_run_blocking_v2` |
+| 3 (current) | `FfiRunOptionsV3` (by pointer) | `myvidcomp_run_blocking_v3` |
 
 Version 1 is the first version under this name. The previous project exported three struct
 versions; those are gone, along with the by-value struct that could never be extended safely.
 
 Version 2 adds `decoder_preference`, and embeds version 1 whole rather than repeating its fields,
-so the two layouts cannot drift apart. A caller still using version 1 keeps working and gets the
-default, which is a graphics card when one is proven to work on the file.
+so the two layouts cannot drift apart. Version 3 embeds `FfiRunOptionsV2` whole and adds
+`encoder_preset`, `quality_metric`, `output_dir`, `audio_policy`, `deinterlace`, `size_guard`,
+`fixed_quality`, and `recursive`. Callers still using version 1 or 2 keep working and receive the
+defaults (`balanced`, `vmaf`, no output mirror, `copy`, `skip`, `off`, unset fixed quality, and
+recursive scanning).
 
 Rules:
 
@@ -42,15 +46,21 @@ hundredths of a VMAF point, so 9500 means 95.0. The struct contains no floating-
 
 | Function | Purpose |
 |---|---|
-| `myvidcomp_ffi_abi_version` | reports the newest supported version |
+| `myvidcomp_ffi_abi_version` | reports the newest supported version (`3`) |
 | `myvidcomp_run_blocking_v1` | runs one conversion pass and reports events |
 | `myvidcomp_run_blocking_v2` | the same, for callers that also choose how decoding happens |
+| `myvidcomp_run_blocking_v3` | the same, for callers passing extended preset, metric, audio, deinterlace, size-guard, output-dir and recursion options |
 | `myvidcomp_cancellation_token_new` | allocates a cancellation token |
 | `myvidcomp_cancellation_token_request_stop` | requests a graceful stop |
 | `myvidcomp_cancellation_token_free` | frees a cancellation token |
 | `myvidcomp_string_free` | frees a string the library returned |
 | `myvidcomp_review_list` | lists conversions waiting for a decision |
 | `myvidcomp_review_resolve` | applies one decision to one pending conversion |
+| `myvidcomp_list_encoders` | probes usable runtime encoders for a target codec as JSON |
+| `myvidcomp_preview_probe` | probes duration and dimensions for comparison preview |
+| `myvidcomp_preview_frame_pair` | extracts synchronized original/converted PNG frames and optional difference heatmap |
+| `myvidcomp_preview_clip_sequence` | extracts short synchronized JPEG bursts for in-app A/B or split playback |
+| `myvidcomp_preview_export_clip` | exports a 6-second side-by-side MP4 comparison clip |
 
 A null return from a run entry point means success; a non-null error string must be released with
 `myvidcomp_string_free`. All string pointers are NUL-terminated UTF-8 valid for the duration of the

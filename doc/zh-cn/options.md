@@ -30,20 +30,35 @@ H.266 只接受 10 位 4:2:0 视频，因此其他所有源在编码前都要转
 |---|---|---|
 | `search`（默认） | 实测并调整 | 用若干设置试编码短片段，选出既达到目标又最小的那个。 |
 | `estimate` | 快速估算 | 根据源视频推算设置，不做试编码。 |
+| `fixed` | 固定画质 | 直接使用调用方指定的 `--fixed-quality` / `fixed_quality` CRF 或 QP 值。 |
 
-用 `--quality-mode` 或 `quality_mode` 配置键设置。搜索需要视频工具支持画质测量；没有该支持时会
-退回估算并给出提示。短于 90 秒的文件一律使用估算，因为试编码的代价会超过转换本身。
+用 `--quality-mode` 或 `quality_mode` 配置键设置。设为 `fixed` 时请提供
+`--fixed-quality`（整数或半档分值）；若留空，运行会退回编码器的默认值。搜索需要视频工具支持
+画质测量；没有该支持时会退回估算并给出提示。`search` 模式下短于 90 秒的文件一律使用估算，
+因为试编码的代价会超过转换本身。
 
 ## 画质检查
 
 | 传输值 | 显示为 | 含义 |
 |---|---|---|
-| `sampled`（默认） | 抽样检查 | 每五帧比对一帧。 |
+| `segmented`（默认） | 分段检测 | 对时长大于等于 60 秒的文件，抽取最多 6 个 6 秒窗口进行 2 倍跳帧比对。 |
+| `sampled` | 抽样检查 | 全片每五帧比对一帧。 |
 | `full` | 逐帧检查 | 比对每一帧。最慢也最准确。 |
 | `off` | 跳过 | 不做比对。 |
 
 用 `--quality-check` 或 `quality_check` 配置键设置。即使设为 `off`，凡是改动了可恢复细节的转换
 仍会被测量，因为它的复核决定取决于分数。
+
+## 画质指标
+
+| 传输值 | 显示为 | 含义 |
+|---|---|---|
+| `vmaf`（默认） | VMAF | 使用 `libvmaf` 测量主观感知画质。 |
+| `xpsnr` | XPSNR | 使用 FFmpeg 内置的 `xpsnr` 滤镜测量加权 PSNR（CPU 上明显更快），并映射到 VMAF 标度。 |
+| `auto` | 自动（XPSNR 优先） | 先用 `xpsnr` 快速初筛，仅在分数贴近目标阈值时再用 `libvmaf` 复核。 |
+
+用 `--quality-metric` 或 `quality_metric` 配置键设置。注意 `xpsnr` 与 `auto` 需要内置 `xpsnr`
+的 FFmpeg 构建，不支持时会自动退回 VMAF。
 
 ## 严格程度
 
@@ -60,8 +75,21 @@ H.266 只接受 10 位 4:2:0 视频，因此其他所有源在编码前都要转
 - 编码器或显卡要求的像素格式转换，
 - 某条流无法装进 MP4 时改用 MKV 容器。
 
-它绝不改变分辨率、帧率、HDR 处理，也不改动音频。隔行源仍然保持原样，因为去隔行改的是画面本身，
-而不是描述画面的方式。参见 [review.md](review.md)。
+它绝不擅自改变分辨率或帧率。隔行源在默认的 `--deinterlace skip` 下保持原样，而启用
+`--deinterlace bwdif` 时会显式通过 `bwdif` 反交错。同样，`--audio-policy copy` 原样保留音轨，
+而 `--audio-policy transcode-incompatible` 会在输出为 MP4 时将不兼容的音轨重编码为 AAC。参见
+[review.md](review.md)。
+
+## 编码速度
+
+| 传输值 | 显示为 | 含义 |
+|---|---|---|
+| `fast` | 快速 | 更快的编码预设，体积略大。 |
+| `balanced`（默认） | 均衡 | 默认的速度与压缩率平衡预设。 |
+| `slow` | 高压缩（较慢） | 更慢的编码预设，压缩率更高。 |
+
+用 `--preset` 或 `encoder_preset` 配置键设置。每个编码器会把这一抽象预设映射到各自原生的预设标志
+（例如 SVT-AV1 的 `-preset`、`libx265`/`libx264` 预设或 NVENC `-preset`）。
 
 ## 编码器
 
@@ -94,15 +122,18 @@ H.266 只接受 10 位 4:2:0 视频，因此其他所有源在编码前都要转
 
 | 传输值 | 显示为 | 含义 |
 |---|---|---|
-| `mp4`（默认） | 仅 MP4 | 流无法装进 MP4 的文件保持原样。 |
+| `mp4`（默认） | 仅 MP4 | 流无法装进 MP4 的文件保持原样（除非启用 `--audio-policy transcode-incompatible` 将不兼容音频转为 AAC）。 |
 | `mkv-fallback` | MP4，必要时用 MKV | 某条流无法装进 MP4 时改用 MKV。 |
+| `mkv` | 始终 MKV | 所有兼容 Matroska 的视频一律输出 `.mkv`。 |
+| `keep` | 保持原容器 | 源文件为 `.mkv` 时输出 `.mkv`，否则按兼容规则输出 `.mp4`。 |
 
 用 `--output-format` 或 `output_format` 配置键设置。
 
 ## 原始文件
 
 `--keep-original` 在结果通过校验后把原文件改名为 `<名称>.old`。`--no-keep-original` 则替换它。
-两者都不适用于待复核的转换：在用户做出选择之前，两份文件始终都在。
+两者都不适用于待复核的转换：在用户做出选择之前，两份文件始终都在。当 `--output-dir` 指向其他目录
+时，源目录树中的原文件保持不动，输出写入对应镜像目录树中。
 
 ## 其余选项
 
@@ -111,8 +142,14 @@ H.266 只接受 10 位 4:2:0 视频，因此其他所有源在编码前都要转
 | `--count N` | 全部 | 最多转换 N 个文件。 |
 | `--dry-run` | 关 | 列出会发生什么，不做任何改动。 |
 | `--tmp-dir PATH` | 每个视频旁边 | 工作文件的存放位置。 |
+| `--output-dir PATH` | 每个视频旁边 | 可选的输出根目录，镜像源目录结构。 |
+| `--recursive` / `--no-recursive` | `true` | 发现视频时是否递归扫描子目录。 |
 | `--review-margin N` | 2.0 | 结果低于目标多少时保留两份文件。 |
 | `--quality-threads N` | 每核一个 | 画质测量使用的线程数。 |
+| `--fixed-quality N` | 编码器默认 | 当 `--quality-mode fixed` 生效时使用的明确 CRF/QP 值。 |
+| `--size-guard MODE` | `off` | 输出体积未变小且无显著缩小时的处理：`off`、`review` 或 `skip`。 |
+| `--audio-policy MODE` | `copy` | 音频策略：`copy` 或 `transcode-incompatible`（MP4 内转为 AAC）。 |
+| `--deinterlace MODE` | `skip` | 隔行扫描源处理方式：`skip` 或 `bwdif`。 |
 | `--ffmpeg PATH`、`--ffprobe PATH` | 自带 | 要使用的视频工具。 |
 | `--config PATH` | `config.yaml` | 要读取的设置文件。 |
 

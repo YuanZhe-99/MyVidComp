@@ -14,6 +14,7 @@ mod codec;
 mod decode;
 mod ffi;
 mod options;
+pub mod preview;
 mod progress;
 mod review;
 mod search;
@@ -21,19 +22,25 @@ mod vmaf;
 
 // The codec tables are internal: they describe encoder families the pipeline
 // knows about, not a public contract.
-pub use ffi::{FfiEventCallback, FfiRunOptionsV1, FfiRunOptionsV2, MYVIDCOMP_FFI_ABI_VERSION};
+pub use ffi::{
+    FfiEventCallback, FfiRunOptionsV1, FfiRunOptionsV2, FfiRunOptionsV3, MYVIDCOMP_FFI_ABI_VERSION,
+};
 use progress::{FileProgress, MeasurePlan, Phase, PhaseWeights, RunProgress};
 pub use review::{ReviewDecision, ReviewItem, list_reviews, resolve_review, review_list_json};
-pub use vmaf::{VmafOptions, VmafScore};
+pub use vmaf::{QualityMeasurement, VmafOptions, VmafScore};
 
 pub use options::{
-    DEFAULT_QUALITY_TARGET, DEFAULT_REVIEW_MARGIN, DecoderPreference, EncoderPreference, HwAccel,
-    Preservation, QualityCheck, QualityMode, TargetCodec, format_quality,
-    normalize_decoder_preference_choice, normalize_encoder_preference_choice,
-    normalize_preservation_choice, normalize_quality_check_choice, normalize_quality_mode_choice,
-    normalize_target_codec_choice, parse_decoder_preference, parse_encoder_preference,
-    parse_preservation, parse_quality_check, parse_quality_mode, parse_quality_points,
-    parse_quality_target, parse_target_codec, validate_quality_target,
+    AudioPolicy, DEFAULT_QUALITY_TARGET, DEFAULT_REVIEW_MARGIN, DecoderPreference,
+    DeinterlacePolicy, EncoderPreference, EncoderPreset, HwAccel, Preservation, QualityCheck,
+    QualityMetric, QualityMode, SizeGuard, TargetCodec, format_quality,
+    normalize_audio_policy_choice, normalize_decoder_preference_choice,
+    normalize_deinterlace_policy_choice, normalize_encoder_preference_choice,
+    normalize_encoder_preset_choice, normalize_preservation_choice, normalize_quality_check_choice,
+    normalize_quality_metric_choice, normalize_quality_mode_choice, normalize_size_guard_choice,
+    normalize_target_codec_choice, parse_audio_policy, parse_decoder_preference,
+    parse_deinterlace_policy, parse_encoder_preference, parse_encoder_preset, parse_preservation,
+    parse_quality_check, parse_quality_metric, parse_quality_mode, parse_quality_points,
+    parse_quality_target, parse_size_guard, parse_target_codec, validate_quality_target,
 };
 
 #[cfg(windows)]
@@ -66,6 +73,8 @@ pub enum OutputFormat {
     #[default]
     Mp4,
     MkvFallback,
+    Mkv,
+    Keep,
 }
 
 impl OutputFormat {
@@ -74,6 +83,8 @@ impl OutputFormat {
         match self {
             OutputFormat::Mp4 => "mp4",
             OutputFormat::MkvFallback => "mkv-fallback",
+            OutputFormat::Mkv => "mkv",
+            OutputFormat::Keep => "keep",
         }
     }
 
@@ -82,6 +93,8 @@ impl OutputFormat {
         match self {
             OutputFormat::Mp4 => "MP4 output",
             OutputFormat::MkvFallback => "MP4 with MKV fallback",
+            OutputFormat::Mkv => "MKV output",
+            OutputFormat::Keep => "keep source container",
         }
     }
 }
@@ -91,8 +104,10 @@ fn parse_output_format(value: &str) -> Result<OutputFormat, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "mp4" => Ok(OutputFormat::Mp4),
         "mkv-fallback" | "mkv_fallback" | "mkvfallback" => Ok(OutputFormat::MkvFallback),
+        "mkv" | "matroska" => Ok(OutputFormat::Mkv),
+        "keep" | "same" | "source" => Ok(OutputFormat::Keep),
         other => Err(format!(
-            "invalid output format: {other}. Supported values: mp4, mkv-fallback"
+            "invalid output format: {other}. Supported values: mp4, mkv-fallback, mkv, keep"
         )),
     }
 }
@@ -135,6 +150,22 @@ pub struct RunOptions {
     pub review_margin: u32,
     /// Worker threads for quality measurement. Zero means "match the machine".
     pub quality_threads: u32,
+    /// Encoder speed-vs-efficiency preset.
+    pub encoder_preset: EncoderPreset,
+    /// Quality measurement engine (VMAF, XPSNR, or Auto two-stage gate).
+    pub quality_metric: QualityMetric,
+    /// Explicit fixed CRF/QP in hundredths when `quality_mode` is `Fixed`.
+    pub fixed_quality: Option<u32>,
+    /// Whether to recurse into subdirectories when scanning `target_folder`.
+    pub recursive: bool,
+    /// Optional separate output directory; leaves source files untouched when set.
+    pub output_dir: Option<PathBuf>,
+    /// What to do when the converted file is not smaller than the source.
+    pub size_guard: SizeGuard,
+    /// How to handle MP4-incompatible audio streams when targeting MP4.
+    pub audio_policy: AudioPolicy,
+    /// How to handle interlaced sources.
+    pub deinterlace: DeinterlacePolicy,
 }
 
 impl Default for RunOptions {
@@ -155,10 +186,18 @@ impl Default for RunOptions {
             target_codec: TargetCodec::Av1,
             preservation: Preservation::Flexible,
             quality_mode: QualityMode::Search,
-            quality_check: QualityCheck::Sampled,
+            quality_check: QualityCheck::Segmented,
             quality_target: DEFAULT_QUALITY_TARGET,
             review_margin: DEFAULT_REVIEW_MARGIN,
             quality_threads: 0,
+            encoder_preset: EncoderPreset::Balanced,
+            quality_metric: QualityMetric::Vmaf,
+            fixed_quality: None,
+            recursive: true,
+            output_dir: None,
+            size_guard: SizeGuard::Off,
+            audio_policy: AudioPolicy::Copy,
+            deinterlace: DeinterlacePolicy::Skip,
         }
     }
 }
@@ -946,17 +985,22 @@ fn run_workflow(
         target_folder: options.target_folder.clone(),
     });
 
-    let files = discover_files(&options.target_folder).map_err(|err| {
-        format!(
-            "failed to scan {}: {err}",
-            options.target_folder.to_string_lossy()
-        )
-    })?;
+    let files = discover_files_with_recursion(&options.target_folder, options.recursive).map_err(
+        |err| {
+            format!(
+                "failed to scan {}: {err}",
+                options.target_folder.to_string_lossy()
+            )
+        },
+    )?;
 
     let mut skipped = 0usize;
     let mut candidates = Vec::new();
     if let Some(tmp_dir) = &options.tmp_dir {
         ensure_tmp_dir(tmp_dir)?;
+    }
+    if let Some(output_dir) = &options.output_dir {
+        ensure_tmp_dir(output_dir)?;
     }
 
     let mut review_stems = HashMap::new();
@@ -1077,17 +1121,34 @@ fn run_workflow(
 
     // Ask once whether this ffmpeg can measure quality. Without it the run
     // still works, it just cannot score results or judge a flexible conversion.
-    let (support, reason) = vmaf::detect_vmaf_support(&options.ffmpeg);
+    let (vmaf_support, reason) = vmaf::detect_vmaf_support(&options.ffmpeg);
+    let xpsnr_available = vmaf::detect_xpsnr_support(&options.ffmpeg);
+    let quality_available = match options.quality_metric {
+        QualityMetric::Vmaf => vmaf_support.available,
+        QualityMetric::Xpsnr => xpsnr_available || vmaf_support.available,
+        QualityMetric::Auto => vmaf_support.available || xpsnr_available,
+    };
     ui.set_codec(options.target_codec);
-    ui.set_quality_available(support.available);
-    if let Some(reason) = reason {
+    ui.set_quality_available(quality_available);
+    ui.set_vmaf_available(vmaf_support.available);
+    ui.set_xpsnr_available(xpsnr_available);
+    if !vmaf_support.available
+        && let Some(reason) = reason
+    {
         ui.emit_capability_missing("libvmaf", &reason);
+    }
+    if options.quality_metric == QualityMetric::Xpsnr && !xpsnr_available && vmaf_support.available
+    {
+        ui.log_warning(
+            "Warning: this FFmpeg build has no xpsnr filter; falling back to VMAF.".to_string(),
+        );
     }
     // Scoring on the card, rather than only decoding on it, needs a filter that
     // no distributed FFmpeg has: it requires a build configured --enable-nonfree,
     // which cannot be redistributed. Someone who built their own gets it, and
     // only when they asked for cuda by name, because nothing here can test it.
-    if support.available
+    if vmaf_support.available
+        && options.quality_metric == QualityMetric::Vmaf
         && options.decoder_preference == DecoderPreference::Method(HwAccel::Cuda)
         && decoding.method() == Some(HwAccel::Cuda)
         && vmaf::detect_vmaf_cuda_support(&options.ffmpeg)
@@ -1102,8 +1163,8 @@ fn run_workflow(
     // What a file passes through decides how its progress is divided up, and
     // that is settled here so every file's bar is shaped the same way.
     ui.set_phase_weights(
-        options.quality_mode == QualityMode::Search && support.available,
-        measure_plan(&options, support.available),
+        options.quality_mode == QualityMode::Search && vmaf_support.available,
+        measure_plan(&options, quality_available),
     );
 
     let mut summary = RunSummary {
@@ -1208,7 +1269,7 @@ fn run_workflow(
 
         ui.start_file(summary.conversion_attempts() + 1, &item, preferred_encoder);
         match transcode_item(&options, &item, &encoders, &mut decoding, &mut ui) {
-            Ok(result) => {
+            Ok(ItemDisposition::Committed(result)) => {
                 summary.converted += 1;
                 summary.source_bytes += result.source_bytes;
                 summary.output_bytes += result.output_bytes;
@@ -1220,6 +1281,11 @@ fn run_workflow(
                     Some(result),
                 );
                 ui.finish_file(&message);
+            }
+            Ok(ItemDisposition::Skipped { reason, code }) => {
+                summary.skipped += 1;
+                ui.emit_file_skipped(&item.input_path, &reason, code);
+                ui.finish_file(&reason);
             }
             Err(err) => {
                 summary.failed += 1;
@@ -1295,6 +1361,14 @@ struct Cli {
     quality_target: u32,
     review_margin: u32,
     quality_threads: u32,
+    encoder_preset: EncoderPreset,
+    quality_metric: QualityMetric,
+    fixed_quality: Option<u32>,
+    recursive: bool,
+    output_dir: Option<PathBuf>,
+    size_guard: SizeGuard,
+    audio_policy: AudioPolicy,
+    deinterlace: DeinterlacePolicy,
     list_reviews: bool,
     resolve_reviews: Option<String>,
 }
@@ -1335,6 +1409,14 @@ impl Cli {
         let mut quality_target_override = None;
         let mut review_margin_override = None;
         let mut quality_threads_override = None;
+        let mut encoder_preset_override = None;
+        let mut quality_metric_override = None;
+        let mut fixed_quality_override = None;
+        let mut recursive_override = None;
+        let mut output_dir_override = None;
+        let mut size_guard_override = None;
+        let mut audio_policy_override = None;
+        let mut deinterlace_override = None;
         let mut list_reviews = false;
         let mut resolve_reviews = None;
         let mut config_path = None;
@@ -1457,6 +1539,50 @@ impl Cli {
                             .map_err(|_| format!("invalid --quality-threads value: {raw}"))?,
                     );
                 }
+                "--preset" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--preset requires a value".to_string())?;
+                    encoder_preset_override = Some(normalize_encoder_preset_choice(&raw)?);
+                }
+                "--quality-metric" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--quality-metric requires a value".to_string())?;
+                    quality_metric_override = Some(normalize_quality_metric_choice(&raw)?);
+                }
+                "--fixed-quality" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--fixed-quality requires a value".to_string())?;
+                    fixed_quality_override = Some(parse_quality_points(&raw)?);
+                }
+                "--recursive" => recursive_override = Some(true),
+                "--no-recursive" => recursive_override = Some(false),
+                "--output-dir" => {
+                    output_dir_override = Some(PathBuf::from(
+                        iter.next()
+                            .ok_or_else(|| "--output-dir requires a path".to_string())?,
+                    ));
+                }
+                "--size-guard" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--size-guard requires a value".to_string())?;
+                    size_guard_override = Some(normalize_size_guard_choice(&raw)?);
+                }
+                "--audio-policy" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--audio-policy requires a value".to_string())?;
+                    audio_policy_override = Some(normalize_audio_policy_choice(&raw)?);
+                }
+                "--deinterlace" => {
+                    let raw = iter
+                        .next()
+                        .ok_or_else(|| "--deinterlace requires a value".to_string())?;
+                    deinterlace_override = Some(normalize_deinterlace_policy_choice(&raw)?);
+                }
                 "--list-reviews" => list_reviews = true,
                 "--resolve-reviews" => {
                     resolve_reviews = Some(
@@ -1497,6 +1623,14 @@ impl Cli {
                 quality_target: quality_target_override.unwrap_or(DEFAULT_QUALITY_TARGET),
                 review_margin: review_margin_override.unwrap_or(DEFAULT_REVIEW_MARGIN),
                 quality_threads: quality_threads_override.unwrap_or(0),
+                encoder_preset: encoder_preset_override.flatten().unwrap_or_default(),
+                quality_metric: quality_metric_override.flatten().unwrap_or_default(),
+                fixed_quality: fixed_quality_override,
+                recursive: recursive_override.unwrap_or(true),
+                output_dir: output_dir_override,
+                size_guard: size_guard_override.flatten().unwrap_or_default(),
+                audio_policy: audio_policy_override.flatten().unwrap_or_default(),
+                deinterlace: deinterlace_override.flatten().unwrap_or_default(),
                 list_reviews,
                 resolve_reviews,
             });
@@ -1566,6 +1700,24 @@ impl Cli {
             quality_threads: quality_threads_override
                 .or(config.quality_threads)
                 .unwrap_or(0),
+            encoder_preset: encoder_preset_override
+                .unwrap_or(config.encoder_preset)
+                .unwrap_or_default(),
+            quality_metric: quality_metric_override
+                .unwrap_or(config.quality_metric)
+                .unwrap_or_default(),
+            fixed_quality: fixed_quality_override.or(config.fixed_quality),
+            recursive: recursive_override.or(config.recursive).unwrap_or(true),
+            output_dir: output_dir_override.or(config.output_dir),
+            size_guard: size_guard_override
+                .unwrap_or(config.size_guard)
+                .unwrap_or_default(),
+            audio_policy: audio_policy_override
+                .unwrap_or(config.audio_policy)
+                .unwrap_or_default(),
+            deinterlace: deinterlace_override
+                .unwrap_or(config.deinterlace)
+                .unwrap_or_default(),
             list_reviews,
             resolve_reviews,
         })
@@ -1594,6 +1746,14 @@ impl From<Cli> for RunOptions {
             quality_target: cli.quality_target,
             review_margin: cli.review_margin,
             quality_threads: cli.quality_threads,
+            encoder_preset: cli.encoder_preset,
+            quality_metric: cli.quality_metric,
+            fixed_quality: cli.fixed_quality,
+            recursive: cli.recursive,
+            output_dir: cli.output_dir,
+            size_guard: cli.size_guard,
+            audio_policy: cli.audio_policy,
+            deinterlace: cli.deinterlace,
         }
     }
 }
@@ -1609,9 +1769,10 @@ What to produce
   --codec av1|hevc|vvc        Output codec. AV1 makes the smallest files, H.265
                               plays on the widest range of devices, H.266 is
                               experimental and very slow. Default: av1.
-  --output-format mp4|mkv-fallback
-                              Use MKV when a stream cannot go in an MP4.
-                              Default: mp4.
+  --output-format mp4|mkv-fallback|mkv|keep
+                              mp4 skips incompatible streams, mkv-fallback uses
+                              MKV when needed, mkv always writes MKV, keep
+                              keeps the source container. Default: mp4.
 
 How careful to be
   --preservation strict|flexible
@@ -1620,14 +1781,17 @@ How careful to be
                               recoverable details would change, and keeps both
                               files so you can choose. Default: flexible.
   --quality N                 Quality target from 50 to 100. Default: 95.
-  --quality-mode search|estimate
+  --quality-mode search|estimate|fixed
                               search encodes short samples to find the setting
                               that just reaches the target. estimate guesses
-                              from the source and skips the test encodes.
+                              from the source. fixed uses --fixed-quality.
                               Default: search.
-  --quality-check full|sampled|off
+  --fixed-quality N           Explicit CRF/QP value when --quality-mode is fixed.
+  --quality-check segmented|sampled|full|off
                               How thoroughly to compare the result with the
-                              original. Default: sampled.
+                              original. Default: segmented.
+  --quality-metric vmaf|xpsnr|auto
+                              Metric used to score quality. Default: vmaf.
   --review-margin N           How far below the target a result may land before
                               it is kept for review. Default: 2.
 
@@ -1637,6 +1801,7 @@ Which encoder
                               the source exactly. gpu prefers speed. cpu makes
                               the smallest files. Default: auto.
   --encoder NAME              Use one specific encoder and no other.
+  --preset fast|balanced|slow Software encoder speed preset. Default: balanced.
   --decoder auto|gpu|cpu|NAME Whether to read the source with a graphics card.
                               auto uses one when it is proven to work on the
                               file and falls back to the processor on any
@@ -1646,6 +1811,13 @@ Which encoder
 
 Files
   --count N                   Convert at most N files. -1 means all.
+  --no-recursive              Only scan the top level of the folder.
+  --output-dir PATH           Write converted files here; keep originals untouched.
+  --size-guard off|review|skip
+                              What to do when output is not smaller than input.
+  --audio-policy copy|transcode-incompatible
+                              Transcode non-MP4 audio to AAC when targeting MP4.
+  --deinterlace skip|bwdif    Deinterlace interlaced sources with bwdif.
   --keep-original             Rename each original to .old instead of deleting.
   --no-keep-original          Replace each original once the result is verified.
   --dry-run                   List what would be converted and stop.
@@ -1737,6 +1909,14 @@ struct Config {
     quality_target: Option<u32>,
     review_margin: Option<u32>,
     quality_threads: Option<u32>,
+    encoder_preset: Option<EncoderPreset>,
+    quality_metric: Option<QualityMetric>,
+    fixed_quality: Option<u32>,
+    recursive: Option<bool>,
+    output_dir: Option<PathBuf>,
+    size_guard: Option<SizeGuard>,
+    audio_policy: Option<AudioPolicy>,
+    deinterlace: Option<DeinterlacePolicy>,
 }
 
 impl Config {
@@ -1867,6 +2047,52 @@ fn parse_config_yaml(text: &str) -> Result<Config, String> {
             continue;
         }
 
+        if key == "encoder_preset" || key == "preset" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            config.encoder_preset = normalize_encoder_preset_choice(&value)
+                .map_err(|err| format!("line {line_number}: {err}"))?;
+            continue;
+        }
+
+        if key == "quality_metric" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            config.quality_metric = normalize_quality_metric_choice(&value)
+                .map_err(|err| format!("line {line_number}: {err}"))?;
+            continue;
+        }
+
+        if key == "fixed_quality" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            if !value.trim().is_empty() {
+                config.fixed_quality = Some(
+                    parse_quality_points(&value)
+                        .map_err(|err| format!("line {line_number}: {err}"))?,
+                );
+            }
+            continue;
+        }
+
+        if key == "size_guard" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            config.size_guard = normalize_size_guard_choice(&value)
+                .map_err(|err| format!("line {line_number}: {err}"))?;
+            continue;
+        }
+
+        if key == "audio_policy" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            config.audio_policy = normalize_audio_policy_choice(&value)
+                .map_err(|err| format!("line {line_number}: {err}"))?;
+            continue;
+        }
+
+        if key == "deinterlace" {
+            let value = optional_yaml_value(raw_value, line_number)?;
+            config.deinterlace = normalize_deinterlace_policy_choice(&value)
+                .map_err(|err| format!("line {line_number}: {err}"))?;
+            continue;
+        }
+
         let value =
             parse_yaml_scalar(raw_value).map_err(|err| format!("line {line_number}: {err}"))?;
 
@@ -1883,6 +2109,12 @@ fn parse_config_yaml(text: &str) -> Result<Config, String> {
             }
             "keep_original" => config.keep_original = Some(parse_yaml_bool(&value)?),
             "dry_run" => config.dry_run = Some(parse_yaml_bool(&value)?),
+            "recursive" => config.recursive = Some(parse_yaml_bool(&value)?),
+            "output_dir" => {
+                if !value.trim().is_empty() {
+                    config.output_dir = Some(PathBuf::from(value));
+                }
+            }
             "tmp_dir" | "temporary_dir" | "temp_dir" => config.tmp_dir = Some(PathBuf::from(value)),
             "ffmpeg" => config.ffmpeg = Some(value),
             "ffprobe" => config.ffprobe = Some(value),
@@ -2114,6 +2346,10 @@ struct WorkItem {
     stream_signature: Vec<StreamSignature>,
     chapter_policy: ChapterPolicy,
     estimated_crf: u8,
+    transcoded_audio_ordinals: Vec<usize>,
+    transcoded_audio_signature_indexes: HashSet<usize>,
+    needs_deinterlace: bool,
+    keep_source_untouched: bool,
 }
 
 /// The run settings that decide how one file is prepared for conversion.
@@ -2121,9 +2357,30 @@ struct WorkItem {
 struct ItemPolicy<'a> {
     keep_original: bool,
     tmp_dir: Option<&'a Path>,
+    output_dir: Option<&'a Path>,
+    target_root: Option<&'a Path>,
     output_format: OutputFormat,
     target_codec: TargetCodec,
     preservation: Preservation,
+    audio_policy: AudioPolicy,
+    deinterlace: DeinterlacePolicy,
+}
+
+impl Default for ItemPolicy<'_> {
+    // AI-FUNC-SUMMARY: Builds default per-file item policy matching RunOptions defaults; returns the policy; side effects: none.
+    fn default() -> Self {
+        Self {
+            keep_original: true,
+            tmp_dir: None,
+            output_dir: None,
+            target_root: None,
+            output_format: OutputFormat::Mp4,
+            target_codec: TargetCodec::Av1,
+            preservation: Preservation::Flexible,
+            audio_policy: AudioPolicy::Copy,
+            deinterlace: DeinterlacePolicy::Skip,
+        }
+    }
 }
 
 impl<'a> ItemPolicy<'a> {
@@ -2132,9 +2389,13 @@ impl<'a> ItemPolicy<'a> {
         Self {
             keep_original: options.keep_original,
             tmp_dir: options.tmp_dir.as_deref(),
+            output_dir: options.output_dir.as_deref(),
+            target_root: Some(options.target_folder.as_path()),
             output_format: options.output_format,
             target_codec: options.target_codec,
             preservation: options.preservation,
+            audio_policy: options.audio_policy,
+            deinterlace: options.deinterlace,
         }
     }
 }
@@ -2151,9 +2412,13 @@ impl WorkItem {
         let ItemPolicy {
             keep_original,
             tmp_dir,
+            output_dir,
+            target_root,
             output_format,
             target_codec,
             preservation,
+            audio_policy,
+            deinterlace,
         } = policy;
         let (streams, chapter_policy) =
             source_stream_policy(&input_path, streams, chapters, &video)
@@ -2164,11 +2429,23 @@ impl WorkItem {
                     .to_string(),
             ));
         }
-        let output_container = select_output_container(output_format, &streams)
-            .map_err(SkipReason::UnsafeReplacement)?;
+        let output_container =
+            select_output_container_for_source(output_format, &input_path, &streams, audio_policy)
+                .map_err(SkipReason::UnsafeReplacement)?;
 
-        let output_path = input_path.with_extension(output_container.extension());
-        let old_path = if keep_original {
+        let keep_source_untouched = output_dir.is_some();
+        let output_path = if let Some(out_dir) = output_dir {
+            let relative = target_root
+                .and_then(|root| input_path.strip_prefix(root).ok())
+                .or_else(|| input_path.file_name().map(Path::new))
+                .unwrap_or(&input_path);
+            out_dir
+                .join(relative)
+                .with_extension(output_container.extension())
+        } else {
+            input_path.with_extension(output_container.extension())
+        };
+        let old_path = if keep_original && !keep_source_untouched {
             Some(with_added_suffix(&input_path, ".old"))
         } else {
             None
@@ -2199,9 +2476,15 @@ impl WorkItem {
             return Err(SkipReason::Conflict);
         }
 
-        if let Some(reason) = interlaced_source_reason(&video) {
-            return Err(SkipReason::UnsafeReplacement(reason));
-        }
+        let needs_deinterlace = if let Some(reason) = interlaced_source_reason(&video) {
+            if deinterlace == DeinterlacePolicy::Bwdif && preservation.allows_deviations() {
+                true
+            } else {
+                return Err(SkipReason::UnsafeReplacement(reason));
+            }
+        } else {
+            false
+        };
 
         // Under strict preservation a codec that cannot record some colour
         // detail means the file is left alone. A flexible run converts it
@@ -2210,6 +2493,28 @@ impl WorkItem {
             && let Some(reason) = unsupported_metadata_reason(target_codec, &video)
         {
             return Err(SkipReason::UnsafeReplacement(reason));
+        }
+
+        let mut transcoded_audio_ordinals = Vec::new();
+        let mut transcoded_audio_signature_indexes = HashSet::new();
+        if output_container == OutputContainer::Mp4
+            && audio_policy == AudioPolicy::TranscodeIncompatible
+        {
+            let mut audio_ordinal = 0usize;
+            for (sig_index, stream) in streams.iter().enumerate() {
+                if stream.codec_type == "audio" {
+                    if !is_mp4_audio_codec(&stream.codec_name) {
+                        transcoded_audio_ordinals.push(audio_ordinal);
+                        transcoded_audio_signature_indexes.insert(sig_index);
+                    }
+                    audio_ordinal += 1;
+                }
+            }
+            if !transcoded_audio_ordinals.is_empty() && !preservation.allows_deviations() {
+                return Err(SkipReason::UnsafeReplacement(
+                    "audio transcoding requires flexible preservation".to_string(),
+                ));
+            }
         }
 
         let estimated_crf = estimate_av1_crf(&video);
@@ -2228,6 +2533,10 @@ impl WorkItem {
             stream_signature,
             chapter_policy,
             estimated_crf,
+            transcoded_audio_ordinals,
+            transcoded_audio_signature_indexes,
+            needs_deinterlace,
+            keep_source_untouched,
         })
     }
 }
@@ -2741,16 +3050,27 @@ fn platform_binary_name(name: &str) -> &str {
     }
 }
 
-// AI-FUNC-SUMMARY: Discovers or probes discover files data; returns collected metadata; side effects: may read filesystem or subprocess output.
-fn discover_files(root: &Path) -> io::Result<Vec<PathBuf>> {
+// AI-FUNC-SUMMARY: Discovers video candidate files in a directory, optionally descending into subdirectories; returns discovered paths; side effects: reads directory entries.
+fn discover_files_with_recursion(root: &Path, recursive: bool) -> io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut dirs = VecDeque::from([root.to_path_buf()]);
 
     while let Some(dir) = dirs.pop_front() {
-        visit_dir(&dir, &mut files, &mut dirs)?;
+        if recursive {
+            visit_dir(&dir, &mut files, &mut dirs)?;
+        } else {
+            let mut unused = VecDeque::new();
+            visit_dir(&dir, &mut files, &mut unused)?;
+        }
     }
 
     Ok(files)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+// AI-FUNC-SUMMARY: Discovers or probes discover files data; returns collected metadata; side effects: may read filesystem or subprocess output.
+fn discover_files(root: &Path) -> io::Result<Vec<PathBuf>> {
+    discover_files_with_recursion(root, true)
 }
 
 // AI-FUNC-SUMMARY: Checks is candidate video path predicate; returns a boolean; side effects: none.
@@ -3585,10 +3905,16 @@ fn pixel_format_has_alpha(pix_fmt: &str) -> bool {
         )
 }
 
+/// Result of finishing one work item: committed/reviewed or skipped after encoding.
+enum ItemDisposition {
+    Committed(ConversionResult),
+    Skipped { reason: String, code: &'static str },
+}
+
 // AI-FUNC-SUMMARY:
 // Purpose: Produces and commits one validated output while allowing safe exact/adapted encoder fallback.
 // Inputs: Run options, one work item, the runtime-usable encoder selection, and progress UI.
-// Returns: Conversion sizes or a terminal/aggregated user-facing error.
+// Returns: Item disposition (committed/reviewed or skipped by size guard) or a terminal/aggregated user-facing error.
 // Side effects: May inspect cached outputs, run encoder attempts, remove failed temps, and commit one validated output.
 // Notes: Cache lookup and final commit occur outside the retry loop; explicit encoder selections never fall back.
 fn transcode_item(
@@ -3597,7 +3923,7 @@ fn transcode_item(
     selection: &EncoderSelection,
     decoding: &mut decode::Decoding,
     ui: &mut ProgressUi,
-) -> Result<ConversionResult, String> {
+) -> Result<ItemDisposition, String> {
     let metadata_filter = metadata_bsf_arg(
         options.target_codec,
         &item.video,
@@ -3638,9 +3964,17 @@ fn transcode_item(
         // Each attempt starts the phases over, so the progress it reports is
         // placed inside the part of the file that is still to come.
         ui.begin_attempt();
-        // Tune the quality setting on samples before committing to a full
-        // encode. The result replaces the estimate for this attempt only.
-        if options.quality_mode == QualityMode::Search && ui.quality_available {
+        if options.quality_mode == QualityMode::Fixed {
+            if let Some(fixed) = options.fixed_quality
+                && codec::quality_style(plan.encoder.kind) != codec::QualityStyle::Bitrate
+            {
+                let range = codec::quality_range(plan.encoder.kind);
+                plan.quality =
+                    EncoderQuality::Constant((fixed as f64 / 100.0).clamp(range.min, range.max));
+            }
+        } else if options.quality_mode == QualityMode::Search && ui.vmaf_available {
+            // Tune the quality setting on samples before committing to a full
+            // encode. The result replaces the estimate for this attempt only.
             plan.quality = search_quality_for(options, item, &plan, ui);
         }
         let plan = &plan;
@@ -3696,6 +4030,8 @@ fn transcode_item(
 struct ConversionOutcome {
     /// Measured quality in hundredths, when it could be measured.
     score: Option<u32>,
+    /// Timestamp in seconds where quality was lowest, when recorded.
+    worst_frame_seconds: Option<f64>,
     /// Recoverable differences from the source, as (kind, sentence) pairs.
     deviations: Vec<(String, String)>,
     /// True when the result must be kept beside its original for the user.
@@ -3763,14 +4099,21 @@ fn search_quality_for(
         search::hardware_bitrate_ladder(estimate_target_bitrate(item, options.target_codec).0)
     });
     let range = codec::quality_range(kind);
+    let initial_guess =
+        (ladder.is_none()).then(|| codec::convert_quality(item.estimated_crf, kind));
     let mut tried: Vec<(f64, u32)> = Vec::new();
 
     for iteration in 0..search::MAX_ITERATIONS {
         // Hardware encoders walk a fixed ladder of bitrates; everything else
-        // interpolates on its own quality scale.
+        // interpolates on its own quality scale starting from the quick estimate.
         let candidate = match &ladder {
             Some(ladder) => ladder.get(iteration).copied(),
-            None => search::next_quality(&tried, options.quality_target, range),
+            None => search::next_quality_with_guess(
+                &tried,
+                options.quality_target,
+                range,
+                initial_guess,
+            ),
         };
         let Some(candidate) = candidate else {
             break;
@@ -3840,6 +4183,18 @@ fn plan_deviations(
     if let Some(target) = plan.kind.output_pix_fmt() {
         deviations.push(pixel_format_deviation(item, target));
     }
+    if !item.transcoded_audio_ordinals.is_empty() {
+        deviations.push((
+            "audio_transcode".to_string(),
+            "MP4-incompatible audio stream(s) were converted to AAC.".to_string(),
+        ));
+    }
+    if item.needs_deinterlace {
+        deviations.push((
+            "deinterlace".to_string(),
+            "Interlaced source frames were deinterlaced with bwdif.".to_string(),
+        ));
+    }
 
     deviations
 }
@@ -3872,6 +4227,7 @@ fn assess_quality(
     if !must_measure && !wants_measure {
         return ConversionOutcome {
             score: None,
+            worst_frame_seconds: None,
             deviations,
             needs_review: false,
         };
@@ -3881,6 +4237,7 @@ fn assess_quality(
         // The reason was already reported once at the start of the run.
         return ConversionOutcome {
             score: None,
+            worst_frame_seconds: None,
             deviations,
             needs_review: must_measure,
         };
@@ -3894,7 +4251,8 @@ fn assess_quality(
     ui.finish_phase(Phase::Measuring);
 
     match measured {
-        Ok(score) => {
+        Ok(measurement) => {
+            let score = measurement.score;
             let caveat = vmaf::accuracy_caveat(&item.video).map(str::to_string);
             let passed = score.hundredths >= options.review_threshold();
             ui.emit_quality_measured(
@@ -3916,6 +4274,7 @@ fn assess_quality(
             }
             ConversionOutcome {
                 score: Some(score.hundredths),
+                worst_frame_seconds: measurement.worst_frame_seconds,
                 needs_review: !passed || !deviations.is_empty(),
                 deviations,
             }
@@ -3924,6 +4283,7 @@ fn assess_quality(
             ui.log_warning(format!("Warning: could not measure quality: {err}"));
             ConversionOutcome {
                 score: None,
+                worst_frame_seconds: None,
                 needs_review: must_measure,
                 deviations,
             }
@@ -3934,33 +4294,178 @@ fn assess_quality(
 // AI-FUNC-SUMMARY:
 // Purpose: Measures a converted file against its source while reporting how far the comparison has got.
 // Inputs: Run options, the work item, the measurement settings and the progress UI.
-// Returns: The score or a user-facing error.
+// Returns: The measurement (score + optional worst timestamp) or a user-facing error.
 // Side effects: Runs ffmpeg and emits progress events.
-// Notes: The score is printed on stderr while progress arrives on stdout, which is why this streams rather than waiting for the process to end.
+// Notes: Supports segmented window spot-checking, VMAF, XPSNR, and Auto two-stage verification.
 fn measure_quality_with_progress(
     options: &RunOptions,
     item: &WorkItem,
     vmaf_options: VmafOptions,
     decoding: &mut decode::Decoding,
     ui: &mut ProgressUi,
-) -> Result<VmafScore, String> {
-    // Both files are read here, and the comparison itself always runs on the
-    // processor, so decoding on the card is what leaves it free to do that.
-    // The two files are in different codecs, and hardware that decodes the
-    // source will not necessarily decode what was made from it, so each one is
-    // asked about separately.
+) -> Result<vmaf::QualityMeasurement, String> {
     let source = decoding.method_for(&options.ffmpeg, &item.input_path, &item.video.codec_name);
     let converted = decoding.method_for(
         &options.ffmpeg,
         &item.temp_path,
         options.target_codec.ffprobe_name(),
     );
-    // The CUDA filter keeps the frames on the card from decode to score, but it
-    // accepts only eight-bit 4:2:0, so anything else falls back to the ordinary
-    // path rather than failing.
-    let on_gpu = decoding.scores_on_gpu() && vmaf::can_score_on_gpu(&item.video);
-    let measure = |methods: (Option<HwAccel>, Option<HwAccel>), ui: &mut ProgressUi| {
-        let args = if on_gpu && methods.0.is_some() && methods.1.is_some() {
+    let use_segmented = options.quality_check == QualityCheck::Segmented
+        || (options.quality_check == QualityCheck::Off
+            && options.preservation == Preservation::Flexible);
+    let windows = use_segmented
+        .then(|| vmaf::segmented_plan(item.video.duration_seconds))
+        .flatten();
+
+    let metric = match options.quality_metric {
+        QualityMetric::Vmaf => QualityMetric::Vmaf,
+        QualityMetric::Xpsnr if ui.xpsnr_available => QualityMetric::Xpsnr,
+        QualityMetric::Xpsnr => QualityMetric::Vmaf,
+        QualityMetric::Auto if ui.xpsnr_available => QualityMetric::Auto,
+        QualityMetric::Auto => QualityMetric::Vmaf,
+    };
+
+    if metric == QualityMetric::Xpsnr {
+        return measure_with_metric(
+            options,
+            item,
+            vmaf_options,
+            decoding,
+            ui,
+            (converted, source),
+            windows.as_deref(),
+            QualityMetric::Xpsnr,
+        );
+    }
+
+    if metric == QualityMetric::Auto {
+        let xpsnr = measure_with_metric(
+            options,
+            item,
+            vmaf_options,
+            decoding,
+            ui,
+            (converted, source),
+            windows.as_deref(),
+            QualityMetric::Xpsnr,
+        )?;
+        let threshold = i64::from(options.review_threshold());
+        let diff = (i64::from(xpsnr.score.hundredths) - threshold).abs();
+        if diff > 300 || !ui.vmaf_available {
+            return Ok(xpsnr);
+        }
+        ui.log_info(format!(
+            "Info: fast XPSNR check landed near threshold ({}), verifying with VMAF.",
+            format_quality(xpsnr.score.hundredths)
+        ));
+    }
+
+    measure_with_metric(
+        options,
+        item,
+        vmaf_options,
+        decoding,
+        ui,
+        (converted, source),
+        windows.as_deref(),
+        QualityMetric::Vmaf,
+    )
+}
+
+// AI-FUNC-SUMMARY: Executes segmented or full-file quality measurement for a chosen metric with hardware-decode fallback; returns QualityMeasurement or error; side effects: spawns ffmpeg.
+#[allow(clippy::too_many_arguments)]
+fn measure_with_metric(
+    options: &RunOptions,
+    item: &WorkItem,
+    vmaf_options: VmafOptions,
+    decoding: &mut decode::Decoding,
+    ui: &mut ProgressUi,
+    methods: (Option<HwAccel>, Option<HwAccel>),
+    windows: Option<&[vmaf::SegmentWindow]>,
+    metric: QualityMetric,
+) -> Result<vmaf::QualityMeasurement, String> {
+    let on_gpu = metric == QualityMetric::Vmaf
+        && decoding.scores_on_gpu()
+        && vmaf::can_score_on_gpu(&item.video);
+
+    let run_once = |accels: (Option<HwAccel>, Option<HwAccel>),
+                    ui: &mut ProgressUi|
+     -> Result<vmaf::QualityMeasurement, String> {
+        if let Some(windows) = windows {
+            let steps = windows.len();
+            let mut sum = 0u64;
+            let mut worst: Option<(u32, f64)> = None;
+            for (idx, window) in windows.iter().enumerate() {
+                let args = if metric == QualityMetric::Xpsnr {
+                    vmaf::build_xpsnr_args(
+                        &item.temp_path,
+                        &item.input_path,
+                        &item.video,
+                        Some(*window),
+                        true,
+                        accels,
+                    )
+                } else {
+                    vmaf::build_segmented_vmaf_args(
+                        &item.temp_path,
+                        &item.input_path,
+                        &item.video,
+                        vmaf_options,
+                        *window,
+                        true,
+                        accels,
+                    )
+                };
+                let run = run_ffmpeg_streaming(
+                    &options.ffmpeg,
+                    &args,
+                    StreamedRun {
+                        phase: Phase::Measuring,
+                        duration_seconds: window.duration_seconds,
+                        step: idx + 1,
+                        steps,
+                    },
+                    ui,
+                )?;
+                let score = if metric == QualityMetric::Xpsnr {
+                    vmaf::xpsnr_score_from_output(
+                        run.status.success(),
+                        &run.stderr,
+                        vmaf_options.subsample,
+                    )?
+                } else {
+                    vmaf::score_from_output(
+                        run.status.success(),
+                        &run.stderr,
+                        vmaf_options.subsample,
+                    )?
+                };
+                sum += u64::from(score.hundredths);
+                let midpoint = window.start_seconds + window.duration_seconds / 2.0;
+                if worst.is_none_or(|(best_low, _)| score.hundredths < best_low) {
+                    worst = Some((score.hundredths, midpoint));
+                }
+            }
+            return Ok(vmaf::QualityMeasurement {
+                score: VmafScore {
+                    hundredths: (sum / steps as u64) as u32,
+                    subsample: vmaf_options.subsample,
+                },
+                worst_frame_seconds: worst.map(|(_, ts)| ts),
+                metric,
+            });
+        }
+
+        let args = if metric == QualityMetric::Xpsnr {
+            vmaf::build_xpsnr_args(
+                &item.temp_path,
+                &item.input_path,
+                &item.video,
+                None,
+                true,
+                accels,
+            )
+        } else if on_gpu && accels.0.is_some() && accels.1.is_some() {
             vmaf::build_vmaf_cuda_args(
                 &item.temp_path,
                 &item.input_path,
@@ -3975,45 +4480,89 @@ fn measure_quality_with_progress(
                 &item.video,
                 vmaf_options,
                 true,
-                methods,
+                accels,
             )
         };
-        run_ffmpeg_streaming(
+        let run = run_ffmpeg_streaming(
             &options.ffmpeg,
             &args,
             StreamedRun::single(Phase::Measuring, item.video.duration_seconds),
             ui,
-        )
-        .and_then(|run| {
-            vmaf::score_from_output(run.status.success(), &run.stderr, vmaf_options.subsample)
+        )?;
+        let score = if metric == QualityMetric::Xpsnr {
+            vmaf::xpsnr_score_from_output(
+                run.status.success(),
+                &run.stderr,
+                vmaf_options.subsample,
+            )?
+        } else {
+            vmaf::score_from_output(run.status.success(), &run.stderr, vmaf_options.subsample)?
+        };
+        Ok(vmaf::QualityMeasurement {
+            score,
+            worst_frame_seconds: None,
+            metric,
         })
     };
 
-    match measure((converted, source), ui) {
-        Ok(score) => Ok(score),
-        Err(err) if converted.is_some() || source.is_some() => {
+    match run_once(methods, ui) {
+        Ok(measurement) => Ok(measurement),
+        Err(err) if methods.0.is_some() || methods.1.is_some() => {
             ui.log_warning(format!(
                 "Warning: measuring on the graphics card failed, so the rest of this run decodes on the processor: {err}"
             ));
             decoding.disable();
-            measure((None, None), ui)
+            run_once((None, None), ui)
         }
         Err(err) => Err(err),
     }
 }
 
-// AI-FUNC-SUMMARY: Commits a finished conversion, either replacing the original or keeping both for review; returns the conversion sizes or a terminal error; side effects: moves files and may write a review record.
+// AI-FUNC-SUMMARY: Commits a finished conversion, applies size guard policy, or keeps both for review; returns disposition or a terminal error; side effects: moves or removes files and may write a review record.
 fn finish_conversion(
     options: &RunOptions,
     item: &WorkItem,
-    outcome: ConversionOutcome,
+    mut outcome: ConversionOutcome,
     ui: &mut ProgressUi,
-) -> Result<ConversionResult, String> {
-    if !outcome.needs_review {
-        return commit_validated_output(item, options.keep_original, ui);
+) -> Result<ItemDisposition, String> {
+    if options.size_guard != SizeGuard::Off {
+        let source_bytes = file_size(&item.input_path)?;
+        let output_bytes = file_size(&item.temp_path)?;
+        if output_bytes >= source_bytes {
+            match options.size_guard {
+                SizeGuard::Skip => {
+                    let _ = fs::remove_file(&item.temp_path);
+                    return Ok(ItemDisposition::Skipped {
+                        reason: format!(
+                            "converted file ({}) is not smaller than original ({})",
+                            format_bytes(output_bytes),
+                            format_bytes(source_bytes)
+                        ),
+                        code: "larger_than_original",
+                    });
+                }
+                SizeGuard::Review => {
+                    outcome.deviations.push((
+                        "larger_output".to_string(),
+                        format!(
+                            "The converted file ({}) is not smaller than the original ({}).",
+                            format_bytes(output_bytes),
+                            format_bytes(source_bytes)
+                        ),
+                    ));
+                    outcome.needs_review = true;
+                }
+                SizeGuard::Off => {}
+            }
+        }
     }
 
-    commit_for_review(options, item, outcome, ui)
+    if !outcome.needs_review {
+        return commit_validated_output(item, options.keep_original, ui)
+            .map(ItemDisposition::Committed);
+    }
+
+    commit_for_review(options, item, outcome, ui).map(ItemDisposition::Committed)
 }
 
 // AI-FUNC-SUMMARY: Moves a finished conversion beside its untouched original and records why it needs a decision; returns the conversion sizes or a terminal error; side effects: moves the temp file and writes a review record.
@@ -4033,6 +4582,14 @@ fn commit_for_review(
             review_path.to_string_lossy()
         ));
     }
+    if let Some(parent) = review_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create review directory {}: {err}",
+                parent.to_string_lossy()
+            )
+        })?;
+    }
 
     move_validated_output_with_ui(&item.temp_path, &review_path, ui)?;
 
@@ -4048,6 +4605,9 @@ fn commit_for_review(
         quality: ui.last_quality.clone(),
         score: outcome.score,
         target: options.quality_target,
+        duration_seconds: (item.video.duration_seconds > 0.0)
+            .then_some(item.video.duration_seconds),
+        worst_frame_seconds: outcome.worst_frame_seconds,
         deviations: outcome
             .deviations
             .iter()
@@ -4075,7 +4635,13 @@ fn execute_transcode_attempt(
     remove_failed_attempt_output(&item.temp_path)?;
 
     let method = decoding.method_for(&options.ffmpeg, &item.input_path, &item.video.codec_name);
-    let args = build_ffmpeg_args_for_plan(item, plan, options.target_codec, method);
+    let args = build_ffmpeg_args_for_plan_with_preset(
+        item,
+        plan,
+        options.target_codec,
+        method,
+        options.encoder_preset,
+    );
     let mut run = run_ffmpeg_streaming(
         &options.ffmpeg,
         &args,
@@ -4095,7 +4661,13 @@ fn execute_transcode_attempt(
         ));
         decoding.disable();
         remove_failed_attempt_output(&item.temp_path)?;
-        let args = build_ffmpeg_args_for_plan(item, plan, options.target_codec, None);
+        let args = build_ffmpeg_args_for_plan_with_preset(
+            item,
+            plan,
+            options.target_codec,
+            None,
+            options.encoder_preset,
+        );
         run = run_ffmpeg_streaming(
             &options.ffmpeg,
             &args,
@@ -4508,12 +5080,24 @@ fn build_ffmpeg_args(item: &WorkItem, encoder: &Encoder) -> Vec<String> {
     build_ffmpeg_args_for_plan(item, &plan, TargetCodec::Av1, None)
 }
 
-// AI-FUNC-SUMMARY: Builds ffmpeg arguments for one encode attempt; returns command arguments; side effects: none.
+#[cfg_attr(not(test), allow(dead_code))]
+// AI-FUNC-SUMMARY: Builds ffmpeg arguments for one encode attempt using the balanced preset; returns command arguments; side effects: none.
 fn build_ffmpeg_args_for_plan(
     item: &WorkItem,
     plan: &TranscodePlan<'_>,
     codec: TargetCodec,
     decoding: Option<HwAccel>,
+) -> Vec<String> {
+    build_ffmpeg_args_for_plan_with_preset(item, plan, codec, decoding, EncoderPreset::Balanced)
+}
+
+// AI-FUNC-SUMMARY: Builds ffmpeg arguments for one encode attempt with an explicit speed preset, audio transcode rules, and optional deinterlacing; returns command arguments; side effects: none.
+fn build_ffmpeg_args_for_plan_with_preset(
+    item: &WorkItem,
+    plan: &TranscodePlan<'_>,
+    codec: TargetCodec,
+    decoding: Option<HwAccel>,
+    preset: EncoderPreset,
 ) -> Vec<String> {
     let encoder = plan.encoder;
     let plan_kind = plan.kind;
@@ -4549,7 +5133,24 @@ fn build_ffmpeg_args_for_plan(
         encoder.name.clone(),
     ]);
 
-    args.extend(encoder_quality_args(encoder, &plan.quality));
+    for ordinal in &item.transcoded_audio_ordinals {
+        args.extend([
+            format!("-c:a:{ordinal}"),
+            "aac".to_string(),
+            format!("-b:a:{ordinal}"),
+            "192k".to_string(),
+        ]);
+    }
+
+    if item.needs_deinterlace {
+        args.extend(["-vf:v:0".to_string(), "bwdif=mode=send_frame".to_string()]);
+    }
+
+    args.extend(encoder_quality_args_with_preset(
+        encoder,
+        &plan.quality,
+        preset,
+    ));
 
     // Apple players only decode HEVC in MP4 when it carries the hvc1 tag, and
     // FFmpeg writes the other one by default.
@@ -5095,8 +5696,12 @@ fn mediacodec_args() -> Vec<String> {
     vec!["-ndk_async".to_string(), "1".to_string()]
 }
 
-// AI-FUNC-SUMMARY: Builds the quality arguments for one encoder at one setting; returns the argument list; side effects: none.
-fn encoder_quality_args(encoder: &Encoder, quality: &EncoderQuality) -> Vec<String> {
+// AI-FUNC-SUMMARY: Builds the quality arguments for one encoder at one setting and speed preset; returns the argument list; side effects: none.
+fn encoder_quality_args_with_preset(
+    encoder: &Encoder,
+    quality: &EncoderQuality,
+    preset: EncoderPreset,
+) -> Vec<String> {
     let kind = encoder.kind;
     match (kind, quality) {
         (_, EncoderQuality::Bitrate(bits)) => {
@@ -5119,7 +5724,12 @@ fn encoder_quality_args(encoder: &Encoder, quality: &EncoderQuality) -> Vec<Stri
             "-crf".to_string(),
             quality_value_arg(*value, kind),
             "-preset".to_string(),
-            "6".to_string(),
+            match preset {
+                EncoderPreset::Fast => "8",
+                EncoderPreset::Balanced => "6",
+                EncoderPreset::Slow => "4",
+            }
+            .to_string(),
         ],
         (EncoderKind::LibAom, EncoderQuality::Constant(value)) => vec![
             "-crf".to_string(),
@@ -5127,27 +5737,44 @@ fn encoder_quality_args(encoder: &Encoder, quality: &EncoderQuality) -> Vec<Stri
             "-b:v".to_string(),
             "0".to_string(),
             "-cpu-used".to_string(),
-            "4".to_string(),
+            match preset {
+                EncoderPreset::Fast => "6",
+                EncoderPreset::Balanced => "4",
+                EncoderPreset::Slow => "2",
+            }
+            .to_string(),
         ],
         (EncoderKind::Rav1e, EncoderQuality::Constant(value)) => vec![
             "-qp".to_string(),
             quality_value_arg(*value, kind),
             "-speed".to_string(),
-            "6".to_string(),
+            match preset {
+                EncoderPreset::Fast => "9",
+                EncoderPreset::Balanced => "6",
+                EncoderPreset::Slow => "4",
+            }
+            .to_string(),
         ],
         (EncoderKind::X265, EncoderQuality::Constant(value)) => vec![
             "-crf".to_string(),
             quality_value_arg(*value, kind),
             "-preset".to_string(),
-            "medium".to_string(),
+            match preset {
+                EncoderPreset::Fast => "fast",
+                EncoderPreset::Balanced => "medium",
+                EncoderPreset::Slow => "slow",
+            }
+            .to_string(),
         ],
         (EncoderKind::Vvenc, EncoderQuality::Constant(value)) => vec![
             "-qp".to_string(),
             quality_value_arg(*value, kind),
             "-preset".to_string(),
-            // Even the fastest VVenC preset is slow; anything higher is not
-            // usable for batch work.
-            "faster".to_string(),
+            match preset {
+                EncoderPreset::Fast | EncoderPreset::Balanced => "faster",
+                EncoderPreset::Slow => "fast",
+            }
+            .to_string(),
         ],
         (EncoderKind::Hardware, EncoderQuality::Constant(value)) => {
             vec!["-cq".to_string(), quality_value_arg(*value, kind)]
@@ -5214,7 +5841,7 @@ fn measure_plan(options: &RunOptions, quality_available: bool) -> MeasurePlan {
     }
     match options.quality_check {
         QualityCheck::Full => MeasurePlan::Full,
-        QualityCheck::Sampled => MeasurePlan::Sampled,
+        QualityCheck::Segmented | QualityCheck::Sampled => MeasurePlan::Sampled,
         QualityCheck::Off => {
             if options.preservation == Preservation::Flexible {
                 MeasurePlan::Sampled
@@ -5343,6 +5970,9 @@ fn validate_output_for_plan(
     if let Some(pix_fmt) = plan.kind.output_pix_fmt() {
         expected.pix_fmt = Some(pix_fmt.to_string());
     }
+    if item.needs_deinterlace {
+        expected.field_order = None;
+    }
     validate_output_against(
         ffprobe,
         path,
@@ -5417,7 +6047,13 @@ fn validate_output_against(
         return Err(err);
     }
 
-    validate_stream_signature(ffprobe, path, &item.stream_signature, codec)?;
+    validate_stream_signature_with_audio(
+        ffprobe,
+        path,
+        &item.stream_signature,
+        codec,
+        &item.transcoded_audio_signature_indexes,
+    )?;
     validate_chapter_policy(ffprobe, path, &item.chapter_policy)?;
 
     Ok(())
@@ -5505,27 +6141,46 @@ fn pixel_format_validation_error(
     None
 }
 
-// AI-FUNC-SUMMARY: Validates validate stream signature conditions; returns success, failure, or test assertion result; side effects: may inspect files or emit test failures.
-fn validate_stream_signature(
+// AI-FUNC-SUMMARY: Validates probed output streams against source signature, allowing explicitly transcoded audio streams to report AAC; returns success or error; side effects: runs ffprobe.
+fn validate_stream_signature_with_audio(
     ffprobe: &str,
     path: &Path,
     source: &[StreamSignature],
     codec: TargetCodec,
+    transcoded_audio_indexes: &HashSet<usize>,
 ) -> Result<(), String> {
     let output = probe_streams(ffprobe, path)?;
-    if let Some(err) = stream_signature_validation_error(source, &output, path, codec) {
+    if let Some(err) = stream_signature_validation_error_with_audio(
+        source,
+        &output,
+        path,
+        codec,
+        transcoded_audio_indexes,
+    ) {
         return Err(err);
     }
 
     Ok(())
 }
 
-// AI-FUNC-SUMMARY: Provides stream signature validation error behavior; returns the declared result; side effects: see implementation.
+#[cfg_attr(not(test), allow(dead_code))]
+// AI-FUNC-SUMMARY: Compares stream signatures expecting copied non-primary streams; returns an error message or none; side effects: none.
 fn stream_signature_validation_error(
     source: &[StreamSignature],
     output: &[StreamInfo],
     path: &Path,
     codec: TargetCodec,
+) -> Option<String> {
+    stream_signature_validation_error_with_audio(source, output, path, codec, &HashSet::new())
+}
+
+// AI-FUNC-SUMMARY: Compares expected and actual stream signatures, permitting AAC on explicitly transcoded audio indexes; returns an error message or none; side effects: none.
+fn stream_signature_validation_error_with_audio(
+    source: &[StreamSignature],
+    output: &[StreamInfo],
+    path: &Path,
+    codec: TargetCodec,
+    transcoded_audio_indexes: &HashSet<usize>,
 ) -> Option<String> {
     if output.len() != source.len() {
         return Some(format!(
@@ -5557,6 +6212,17 @@ fn stream_signature_validation_error(
                     "the converted video stream is {}, not the {} that was asked for: {}",
                     output_stream.codec_name,
                     codec.ffprobe_name(),
+                    path.to_string_lossy()
+                ));
+            }
+            continue;
+        }
+
+        if transcoded_audio_indexes.contains(&index) {
+            if !output_stream.codec_name.eq_ignore_ascii_case("aac") {
+                return Some(format!(
+                    "output audio stream #{index} codec changed to {}, expected aac: {}",
+                    output_stream.codec_name,
                     path.to_string_lossy()
                 ));
             }
@@ -5856,6 +6522,25 @@ fn fps_matches(source: f64, output: f64) -> bool {
 // Side effects: Renames, copies, and deletes files; writes commit progress.
 // Notes: An output name that is the source itself (the same path, or a differently-cased name for the same file) goes through the recovery rename, never the move-then-delete path, which would delete the converted file.
 fn commit_output(item: &WorkItem, keep_original: bool, ui: &mut ProgressUi) -> Result<(), String> {
+    if item.keep_source_untouched {
+        if let Some(parent) = item.output_path.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "failed to create output directory {}: {err}",
+                    parent.to_string_lossy()
+                )
+            })?;
+        }
+        return move_validated_output_with_ui(&item.temp_path, &item.output_path, ui).map_err(
+            |err| {
+                format!(
+                    "failed to move converted file to {}: {err}",
+                    item.output_path.to_string_lossy()
+                )
+            },
+        );
+    }
+
     if keep_original {
         let old_path = item
             .old_path
@@ -6146,6 +6831,10 @@ struct ProgressUi<'a> {
     codec: TargetCodec,
     /// Whether this ffmpeg build can measure quality at all.
     quality_available: bool,
+    /// Whether `libvmaf` is available in this ffmpeg build.
+    vmaf_available: bool,
+    /// Whether `xpsnr` is available in this ffmpeg build.
+    xpsnr_available: bool,
     /// The encoder and quality setting of the attempt in progress, kept
     /// so a review record can say how the file was produced.
     last_encoder: String,
@@ -6265,6 +6954,8 @@ impl<'a> ProgressUi<'a> {
             terminal,
             codec: TargetCodec::Av1,
             quality_available: false,
+            vmaf_available: false,
+            xpsnr_available: false,
             last_encoder: String::new(),
             last_quality: String::new(),
             file: FileProgress::new(weights),
@@ -6280,6 +6971,16 @@ impl<'a> ProgressUi<'a> {
     // AI-FUNC-SUMMARY: Records whether quality can be measured in this run; returns none; side effects: updates progress state.
     fn set_quality_available(&mut self, available: bool) {
         self.quality_available = available;
+    }
+
+    // AI-FUNC-SUMMARY: Records whether libvmaf is available in this ffmpeg build; returns none; side effects: updates progress state.
+    fn set_vmaf_available(&mut self, available: bool) {
+        self.vmaf_available = available;
+    }
+
+    // AI-FUNC-SUMMARY: Records whether xpsnr is available in this ffmpeg build; returns none; side effects: updates progress state.
+    fn set_xpsnr_available(&mut self, available: bool) {
+        self.xpsnr_available = available;
     }
 
     // AI-FUNC-SUMMARY: Reports which decoding method the run will use; returns none; side effects: emits an event and prints a terminal line.
@@ -7085,23 +7786,75 @@ fn read_be_u64(reader: &mut impl Read) -> Result<u64, String> {
     Ok(u64::from_be_bytes(bytes))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 // AI-FUNC-SUMMARY: Selects MP4 or conservative Matroska fallback after carrier filtering; returns a container or detailed unsupported-stream reason; side effects: none.
 fn select_output_container(
     output_format: OutputFormat,
     streams: &[StreamInfo],
 ) -> Result<OutputContainer, String> {
-    let Some(mp4_reason) = mp4_incompatible_stream_reason(streams) else {
-        return Ok(OutputContainer::Mp4);
-    };
-    if output_format == OutputFormat::Mp4 {
-        return Err(mp4_reason);
+    select_output_container_for_source(
+        output_format,
+        Path::new("clip.mp4"),
+        streams,
+        AudioPolicy::Copy,
+    )
+}
+
+// AI-FUNC-SUMMARY: Selects output container from format policy, source extension, stream compatibility, and audio policy; returns container or skip detail; side effects: none.
+fn select_output_container_for_source(
+    output_format: OutputFormat,
+    source_path: &Path,
+    streams: &[StreamInfo],
+    audio_policy: AudioPolicy,
+) -> Result<OutputContainer, String> {
+    match output_format {
+        OutputFormat::Mkv => {
+            if let Some(reason) = matroska_incompatible_stream_reason(streams) {
+                return Err(reason);
+            }
+            Ok(OutputContainer::Mkv)
+        }
+        OutputFormat::Keep => {
+            let ext = source_path
+                .extension()
+                .and_then(OsStr::to_str)
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if ext == "mkv" || ext == "webm" {
+                if let Some(reason) = matroska_incompatible_stream_reason(streams) {
+                    return Err(reason);
+                }
+                Ok(OutputContainer::Mkv)
+            } else {
+                if let Some(reason) =
+                    mp4_incompatible_stream_reason_with_policy(streams, audio_policy)
+                {
+                    return Err(reason);
+                }
+                Ok(OutputContainer::Mp4)
+            }
+        }
+        OutputFormat::Mp4 => {
+            if let Some(reason) = mp4_incompatible_stream_reason_with_policy(streams, audio_policy)
+            {
+                return Err(reason);
+            }
+            Ok(OutputContainer::Mp4)
+        }
+        OutputFormat::MkvFallback => {
+            let Some(mp4_reason) =
+                mp4_incompatible_stream_reason_with_policy(streams, audio_policy)
+            else {
+                return Ok(OutputContainer::Mp4);
+            };
+            if let Some(reason) = matroska_incompatible_stream_reason(streams) {
+                return Err(format!(
+                    "{mp4_reason}; MKV fallback is also unsafe: {reason}"
+                ));
+            }
+            Ok(OutputContainer::Mkv)
+        }
     }
-    if let Some(reason) = matroska_incompatible_stream_reason(streams) {
-        return Err(format!(
-            "{mp4_reason}; MKV fallback is also unsafe: {reason}"
-        ));
-    }
-    Ok(OutputContainer::Mkv)
 }
 
 // AI-FUNC-SUMMARY: Finds a mapped non-primary stream type not conservatively copy-compatible with Matroska; returns actual index/type/codec detail or none; side effects: none.
@@ -7122,12 +7875,25 @@ fn matroska_incompatible_stream_reason(streams: &[StreamInfo]) -> Option<String>
     None
 }
 
-// AI-FUNC-SUMMARY: Finds the first non-primary stream that cannot be copied into an MP4 container; returns a detail message or none; side effects: none.
+#[cfg_attr(not(test), allow(dead_code))]
+// AI-FUNC-SUMMARY: Finds the first non-primary stream that cannot be copied into an MP4 container under copy policy; returns a detail message or none; side effects: none.
 fn mp4_incompatible_stream_reason(streams: &[StreamInfo]) -> Option<String> {
+    mp4_incompatible_stream_reason_with_policy(streams, AudioPolicy::Copy)
+}
+
+// AI-FUNC-SUMMARY: Finds the first non-primary stream that cannot fit in an MP4 container given the active audio policy; returns a detail message or none; side effects: none.
+fn mp4_incompatible_stream_reason_with_policy(
+    streams: &[StreamInfo],
+    audio_policy: AudioPolicy,
+) -> Option<String> {
     let mut seen_primary_video = false;
     for stream in streams {
         if stream.codec_type == "video" && !seen_primary_video {
             seen_primary_video = true;
+            continue;
+        }
+
+        if stream.codec_type == "audio" && audio_policy == AudioPolicy::TranscodeIncompatible {
             continue;
         }
 
@@ -8023,6 +8789,7 @@ target_folder: "\\\\server\\share\\videos"
                 output_format: OutputFormat::Mp4,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -8055,6 +8822,7 @@ target_folder: "\\\\server\\share\\videos"
                 output_format: OutputFormat::Mp4,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -8658,6 +9426,7 @@ target_folder: "\\\\server\\share\\videos"
                 output_format: OutputFormat::Mp4,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -8712,6 +9481,7 @@ target_folder: "\\\\server\\share\\videos"
                 output_format: OutputFormat::Mp4,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -9351,6 +10121,7 @@ duration=60.0
                 output_format: OutputFormat::Mp4,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
     }
@@ -9472,6 +10243,7 @@ duration=60.0
                     output_format: OutputFormat::Mp4,
                     target_codec: TargetCodec::Av1,
                     preservation: Preservation::Strict,
+                    ..ItemPolicy::default()
                 },
             ),
             Err(SkipReason::UnsafeReplacement(_))
@@ -9505,6 +10277,7 @@ duration=60.0
                     output_format: OutputFormat::Mp4,
                     target_codec: TargetCodec::Av1,
                     preservation: Preservation::Strict,
+                    ..ItemPolicy::default()
                 },
             ),
             Err(SkipReason::UnsafeReplacement(_))
@@ -9686,6 +10459,10 @@ duration=60.0
             stream_signature: Vec::new(),
             chapter_policy: ChapterPolicy::Ordinary,
             estimated_crf: 28,
+            transcoded_audio_ordinals: Vec::new(),
+            transcoded_audio_signature_indexes: HashSet::new(),
+            needs_deinterlace: false,
+            keep_source_untouched: false,
         }
     }
     // AI-FUNC-SUMMARY: Provides sample video behavior; returns the declared result; side effects: see implementation.
@@ -9854,6 +10631,7 @@ duration=60.0
                 output_format: OutputFormat::MkvFallback,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -9890,6 +10668,7 @@ duration=60.0
                 output_format: OutputFormat::MkvFallback,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -9969,6 +10748,7 @@ duration=60.0
                 output_format: OutputFormat::MkvFallback,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -10081,6 +10861,7 @@ duration=60.0
                 output_format: OutputFormat::Mp4,
                 target_codec: TargetCodec::Av1,
                 preservation: Preservation::Strict,
+                ..ItemPolicy::default()
             },
         )
         .unwrap();
@@ -10176,5 +10957,106 @@ duration=60.0
         assert!(!is_mp4_video_codec("vp9"));
         assert!(!is_mp4_video_codec("h263"));
         assert!(!is_mp4_video_codec("vp8"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies new v0.3.1 container modes (mkv and keep), audio transcode, deinterlace, preset args, and non-recursive discovery; returns nothing; side effects: creates and removes temp files.
+    fn supports_flexible_v031_options() {
+        let root = make_temp_dir("v031-opts");
+        let sub = root.join("nested");
+        fs::create_dir(&sub).unwrap();
+        let top = root.join("top.mp4");
+        let child = sub.join("child.mkv");
+        fs::write(&top, b"").unwrap();
+        fs::write(&child, b"").unwrap();
+
+        let flat = discover_files_with_recursion(&root, false).unwrap();
+        assert_eq!(flat, vec![top.clone()]);
+        let deep = discover_files_with_recursion(&root, true).unwrap();
+        assert_eq!(deep.len(), 2);
+
+        let streams = vec![
+            sample_stream(0, "video", "h264"),
+            sample_stream(1, "audio", "dts"),
+        ];
+        assert_eq!(
+            select_output_container_for_source(
+                OutputFormat::Mkv,
+                &top,
+                &streams,
+                AudioPolicy::Copy,
+            )
+            .unwrap(),
+            OutputContainer::Mkv
+        );
+        assert_eq!(
+            select_output_container_for_source(
+                OutputFormat::Keep,
+                &child,
+                &streams,
+                AudioPolicy::Copy,
+            )
+            .unwrap(),
+            OutputContainer::Mkv
+        );
+        assert_eq!(
+            select_output_container_for_source(
+                OutputFormat::Mp4,
+                &top,
+                &streams,
+                AudioPolicy::TranscodeIncompatible,
+            )
+            .unwrap(),
+            OutputContainer::Mp4
+        );
+
+        let mut interlaced = sample_video("mpeg2video", Some(4_000_000));
+        interlaced.field_order = Some("tt".to_string());
+        let out_dir = root.join("out");
+        let item = WorkItem::new(
+            top,
+            interlaced,
+            streams,
+            Vec::new(),
+            ItemPolicy {
+                output_dir: Some(&out_dir),
+                target_root: Some(&root),
+                output_format: OutputFormat::Mp4,
+                preservation: Preservation::Flexible,
+                audio_policy: AudioPolicy::TranscodeIncompatible,
+                deinterlace: DeinterlacePolicy::Bwdif,
+                ..ItemPolicy::default()
+            },
+        )
+        .unwrap();
+        assert!(item.keep_source_untouched);
+        assert_eq!(item.old_path, None);
+        assert_eq!(item.output_path, out_dir.join("top.mp4"));
+        assert!(item.needs_deinterlace);
+        assert_eq!(item.transcoded_audio_ordinals, vec![0]);
+
+        let encoder = Encoder {
+            name: "libsvtav1".to_string(),
+            kind: EncoderKind::SvtAv1,
+        };
+        let plan = TranscodePlan {
+            encoder: &encoder,
+            kind: TranscodePlanKind::Exact,
+            quality: EncoderQuality::Constant(28.0),
+            exempt: MetadataExemptions::default(),
+        };
+        let args = build_ffmpeg_args_for_plan_with_preset(
+            &item,
+            &plan,
+            TargetCodec::Av1,
+            None,
+            EncoderPreset::Slow,
+        );
+        let joined = args.join(" ");
+        assert!(joined.contains("-c:a:0 aac"));
+        assert!(joined.contains("bwdif=mode=send_frame"));
+        assert!(joined.contains("-preset 4"));
+
+        remove_temp_dir(root);
     }
 }

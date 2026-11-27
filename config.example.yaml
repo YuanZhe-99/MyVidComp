@@ -22,11 +22,11 @@ preservation: flexible
 # Quality target as a VMAF score from 50 to 100.
 quality_target: 95
 
-# How the setting is chosen: search (test-encodes samples) or estimate.
+# How the setting is chosen: search (test-encodes samples), estimate or fixed.
 quality_mode: search
 
-# How thoroughly the result is checked: sampled, full or off.
-quality_check: sampled
+# How thoroughly the result is checked: segmented, sampled, full or off.
+quality_check: segmented
 
 # How far under the target a result may land before both files are kept.
 review_margin: 2
@@ -39,11 +39,22 @@ encoder_preference: auto
 # one. cpu is the setting to keep when a score has to match on another machine.
 decoder_preference: auto
 
-# Container: mp4, or mkv-fallback to use MKV when a stream will not fit.
+# Container: mp4, mkv, mkv-fallback or keep (preserve source container when MP4/MKV).
 output_format: mp4
 
 # Leave blank to choose an encoder automatically.
 encoder:
+
+# Optional v0.4.0 settings (uncomment to override defaults):
+# encoder_preset: balanced   # fast | balanced | slow
+# quality_metric: vmaf       # vmaf | xpsnr | auto
+# fixed_quality:             # e.g. 28 when quality_mode is fixed
+# quality_threads:           # blank uses all logical CPUs
+# recursive: true            # true | false
+# output_dir:                # optional destination root mirror
+# size_guard: off            # off | review | skip
+# audio_policy: copy         # copy | transcode-incompatible
+# deinterlace: skip          # skip | bwdif
 
 # Where working files go. Blank keeps them beside each video, which is
 # fastest for network drives.

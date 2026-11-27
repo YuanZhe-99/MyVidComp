@@ -36,7 +36,7 @@ two trees file-by-file; both must match exactly.
 - URLs.
 - Product, framework, and protocol names: MyVidComp, FFmpeg, FFprobe, AV1, MP4, MKV, Matroska,
   QuickTime, ISO BMFF, Flutter, Dart, Windows, Android, ARM64, x64, MSVC, CMake, PowerShell,
-  H.265, HEVC, H.266, VVC, VMAF.
+  H.265, HEVC, H.266, VVC, VMAF, XPSNR.
 - The `Tier A` / `Tier B` labels used in the function index.
 - Anything inside a fenced code block, including comments written as part of example code,
   unless the comment is prose explaining the example outside the executable line — in which case
@@ -109,6 +109,13 @@ two trees file-by-file; both must match exactly.
 | Tier A / Tier B | Tier A / Tier B | 文档覆盖分级标签，不译 |
 | l10n / localization | 本地化（l10n） | |
 | interface style | 界面风格 | Material 3 / Expressive 二选一；Material 3 与 Expressive 不译 |
+| XPSNR | XPSNR | FFmpeg 内置加权峰值信噪比指标，不译 |
+| segmented check | 分段检测 | 默认质量检测方式（`segmented`） |
+| encoder preset | 编码预设 | `fast` / `balanced` / `slow` |
+| size guard | 体积保护 | `off` / `review` / `skip` |
+| audio policy | 音频策略 | `copy` / `transcode-incompatible` |
+| deinterlace | 反交错 | `skip` / `bwdif` |
+| comparison preview | 对比试看 | 审查界面双模式对比预览 |
 
 ## 6. Review checklist (run before committing a Chinese page)
 

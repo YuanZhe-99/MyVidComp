@@ -49,6 +49,21 @@ final class FfiRunOptionsV2 extends Struct {
   external Pointer<Char> decoderPreference;
 }
 
+/// Run options for ABI version 3, mirroring `FfiRunOptionsV3` in the Rust core.
+final class FfiRunOptionsV3 extends Struct {
+  external FfiRunOptionsV2 v2;
+  external Pointer<Char> encoderPreset;
+  external Pointer<Char> qualityMetric;
+  external Pointer<Char> outputDir;
+  external Pointer<Char> audioPolicy;
+  external Pointer<Char> deinterlace;
+  external Pointer<Char> sizeGuard;
+  @Uint32()
+  external int fixedQuality;
+  @Uint8()
+  external int recursive;
+}
+
 typedef _NativeEventCallback =
     Void Function(Pointer<Char> json, Pointer<Void> userData);
 
@@ -80,6 +95,92 @@ typedef _RunBlockingV2Dart =
       Pointer<NativeFunction<_NativeEventCallback>> callback,
       Pointer<Void> userData,
       Pointer<Void> token,
+    );
+
+typedef _RunBlockingV3Native =
+    Pointer<Char> Function(
+      Pointer<FfiRunOptionsV3> options,
+      Pointer<NativeFunction<_NativeEventCallback>> callback,
+      Pointer<Void> userData,
+      Pointer<Void> token,
+    );
+typedef _RunBlockingV3Dart =
+    Pointer<Char> Function(
+      Pointer<FfiRunOptionsV3> options,
+      Pointer<NativeFunction<_NativeEventCallback>> callback,
+      Pointer<Void> userData,
+      Pointer<Void> token,
+    );
+
+typedef _ListEncodersNative =
+    Pointer<Char> Function(Pointer<Char> ffmpeg, Pointer<Char> codec);
+typedef _ListEncodersDart =
+    Pointer<Char> Function(Pointer<Char> ffmpeg, Pointer<Char> codec);
+
+typedef _PreviewProbeNative =
+    Pointer<Char> Function(Pointer<Char> ffprobe, Pointer<Char> path);
+typedef _PreviewProbeDart =
+    Pointer<Char> Function(Pointer<Char> ffprobe, Pointer<Char> path);
+
+typedef _PreviewFramePairNative =
+    Pointer<Char> Function(
+      Pointer<Char> ffmpeg,
+      Pointer<Char> original,
+      Pointer<Char> review,
+      Uint64 timestampMs,
+      Pointer<Char> outDir,
+      Uint8 includeDiff,
+    );
+typedef _PreviewFramePairDart =
+    Pointer<Char> Function(
+      Pointer<Char> ffmpeg,
+      Pointer<Char> original,
+      Pointer<Char> review,
+      int timestampMs,
+      Pointer<Char> outDir,
+      int includeDiff,
+    );
+
+typedef _PreviewClipSequenceNative =
+    Pointer<Char> Function(
+      Pointer<Char> ffmpeg,
+      Pointer<Char> original,
+      Pointer<Char> review,
+      Uint64 startMs,
+      Uint64 durationMs,
+      Uint32 fps,
+      Uint32 maxHeight,
+      Pointer<Char> outDir,
+    );
+typedef _PreviewClipSequenceDart =
+    Pointer<Char> Function(
+      Pointer<Char> ffmpeg,
+      Pointer<Char> original,
+      Pointer<Char> review,
+      int startMs,
+      int durationMs,
+      int fps,
+      int maxHeight,
+      Pointer<Char> outDir,
+    );
+
+typedef _PreviewExportClipNative =
+    Pointer<Char> Function(
+      Pointer<Char> ffmpeg,
+      Pointer<Char> original,
+      Pointer<Char> review,
+      Uint64 startMs,
+      Uint64 durationMs,
+      Pointer<Char> outPath,
+    );
+typedef _PreviewExportClipDart =
+    Pointer<Char> Function(
+      Pointer<Char> ffmpeg,
+      Pointer<Char> original,
+      Pointer<Char> review,
+      int startMs,
+      int durationMs,
+      Pointer<Char> outPath,
     );
 
 typedef _AbiVersionNative = Uint32 Function();
@@ -122,6 +223,15 @@ class RunRequest {
     required this.qualityCheck,
     required this.qualityTarget,
     required this.reviewMargin,
+    this.qualityThreads = 0,
+    this.encoderPreset = 'balanced',
+    this.qualityMetric = 'vmaf',
+    this.fixedQuality = 0,
+    this.recursive = true,
+    this.outputDir = '',
+    this.sizeGuard = 'off',
+    this.audioPolicy = 'copy',
+    this.deinterlace = 'skip',
   });
 
   final String targetFolder;
@@ -145,6 +255,15 @@ class RunRequest {
 
   /// How far below the target still avoids review, in hundredths.
   final int reviewMargin;
+  final int qualityThreads;
+  final String encoderPreset;
+  final String qualityMetric;
+  final int fixedQuality;
+  final bool recursive;
+  final String outputDir;
+  final String sizeGuard;
+  final String audioPolicy;
+  final String deinterlace;
 
   // AI-FUNC-SUMMARY: Packs the request for the worker isolate; returns a plain map; side effects: none.
   Map<String, Object?> toWorkerMessage() => {
@@ -165,6 +284,15 @@ class RunRequest {
     'qualityCheck': qualityCheck,
     'qualityTarget': qualityTarget,
     'reviewMargin': reviewMargin,
+    'qualityThreads': qualityThreads,
+    'encoderPreset': encoderPreset,
+    'qualityMetric': qualityMetric,
+    'fixedQuality': fixedQuality,
+    'recursive': recursive,
+    'outputDir': outputDir,
+    'sizeGuard': sizeGuard,
+    'audioPolicy': audioPolicy,
+    'deinterlace': deinterlace,
   };
 
   // AI-FUNC-SUMMARY: Rebuilds a request inside the worker isolate; returns the request; side effects: none.
@@ -187,6 +315,15 @@ class RunRequest {
         qualityCheck: message['qualityCheck']! as String,
         qualityTarget: message['qualityTarget']! as int,
         reviewMargin: message['reviewMargin']! as int,
+        qualityThreads: message['qualityThreads'] as int? ?? 0,
+        encoderPreset: message['encoderPreset'] as String? ?? 'balanced',
+        qualityMetric: message['qualityMetric'] as String? ?? 'vmaf',
+        fixedQuality: message['fixedQuality'] as int? ?? 0,
+        recursive: message['recursive'] as bool? ?? true,
+        outputDir: message['outputDir'] as String? ?? '',
+        sizeGuard: message['sizeGuard'] as String? ?? 'off',
+        audioPolicy: message['audioPolicy'] as String? ?? 'copy',
+        deinterlace: message['deinterlace'] as String? ?? 'skip',
       );
 }
 
@@ -357,6 +494,40 @@ class _CoreLibrary {
           'myvidcomp_run_blocking_v2',
         ),
       ),
+      _runBlockingV3 = _guard(
+        () => library.lookupFunction<_RunBlockingV3Native, _RunBlockingV3Dart>(
+          'myvidcomp_run_blocking_v3',
+        ),
+      ),
+      _listEncoders = _guard(
+        () => library.lookupFunction<_ListEncodersNative, _ListEncodersDart>(
+          'myvidcomp_list_encoders',
+        ),
+      ),
+      _previewProbe = _guard(
+        () => library.lookupFunction<_PreviewProbeNative, _PreviewProbeDart>(
+          'myvidcomp_preview_probe',
+        ),
+      ),
+      _previewFramePair = _guard(
+        () => library
+            .lookupFunction<_PreviewFramePairNative, _PreviewFramePairDart>(
+              'myvidcomp_preview_frame_pair',
+            ),
+      ),
+      _previewClipSequence = _guard(
+        () =>
+            library.lookupFunction<
+              _PreviewClipSequenceNative,
+              _PreviewClipSequenceDart
+            >('myvidcomp_preview_clip_sequence'),
+      ),
+      _previewExportClip = _guard(
+        () => library
+            .lookupFunction<_PreviewExportClipNative, _PreviewExportClipDart>(
+              'myvidcomp_preview_export_clip',
+            ),
+      ),
       _tokenNew = _guard(
         () => library.lookupFunction<_TokenNewNative, _TokenNewDart>(
           'myvidcomp_cancellation_token_new',
@@ -391,6 +562,12 @@ class _CoreLibrary {
   final _AbiVersionDart? _abiVersion;
   final _RunBlockingDart? _runBlocking;
   final _RunBlockingV2Dart? _runBlockingV2;
+  final _RunBlockingV3Dart? _runBlockingV3;
+  final _ListEncodersDart? _listEncoders;
+  final _PreviewProbeDart? _previewProbe;
+  final _PreviewFramePairDart? _previewFramePair;
+  final _PreviewClipSequenceDart? _previewClipSequence;
+  final _PreviewExportClipDart? _previewExportClip;
   final _TokenNewDart? _tokenNew;
   final _TokenVoidDart? _tokenStop;
   final _TokenVoidDart? _tokenFree;
@@ -434,16 +611,18 @@ class _CoreLibrary {
     Pointer<NativeFunction<_NativeEventCallback>> callback,
     Pointer<Void> token,
   ) {
+    final runV3 = _runBlockingV3;
     final runV2 = _runBlockingV2;
     final run = _runBlocking;
-    if (runV2 == null && run == null) {
+    if (runV3 == null && runV2 == null && run == null) {
       return 'This copy of MyVidComp is missing its conversion engine.';
     }
 
-    // Version 2 carries the decoding choice. Against an older library only
-    // version 1 exists, and that run decides decoding for itself.
-    final optionsV2 = runV2 == null ? nullptr : calloc<FfiRunOptionsV2>();
-    final options = runV2 == null
+    final optionsV3 = runV3 == null ? nullptr : calloc<FfiRunOptionsV3>();
+    final optionsV2 = runV3 != null
+        ? Pointer<FfiRunOptionsV2>.fromAddress(optionsV3.address)
+        : (runV2 == null ? nullptr : calloc<FfiRunOptionsV2>());
+    final options = (runV3 == null && runV2 == null)
         ? calloc<FfiRunOptionsV1>()
         : Pointer<FfiRunOptionsV1>.fromAddress(optionsV2.address);
     final strings = <Pointer<Char>>[];
@@ -456,10 +635,12 @@ class _CoreLibrary {
 
     try {
       options.ref
-        ..abiVersion = runV2 == null ? 1 : 2
-        ..structSize = runV2 == null
-            ? sizeOf<FfiRunOptionsV1>()
-            : sizeOf<FfiRunOptionsV2>()
+        ..abiVersion = runV3 != null ? 3 : (runV2 != null ? 2 : 1)
+        ..structSize = runV3 != null
+            ? sizeOf<FfiRunOptionsV3>()
+            : (runV2 != null
+                  ? sizeOf<FfiRunOptionsV2>()
+                  : sizeOf<FfiRunOptionsV1>())
         ..targetFolder = text(request.targetFolder)
         ..ffmpeg = text(request.ffmpeg)
         ..ffprobe = text(request.ffprobe)
@@ -474,16 +655,34 @@ class _CoreLibrary {
         ..count = request.count
         ..qualityTarget = request.qualityTarget
         ..reviewMargin = request.reviewMargin
-        ..qualityThreads = 0
+        ..qualityThreads = request.qualityThreads
         ..keepOriginal = request.keepOriginal ? 1 : 0
         ..dryRun = request.dryRun ? 1 : 0;
-      if (runV2 != null) {
+      if (runV3 != null || runV2 != null) {
         optionsV2.ref.decoderPreference = text(request.decoderPreference);
       }
+      if (runV3 != null) {
+        optionsV3.ref
+          ..encoderPreset = text(request.encoderPreset)
+          ..qualityMetric = text(request.qualityMetric)
+          ..outputDir = text(request.outputDir)
+          ..audioPolicy = text(request.audioPolicy)
+          ..deinterlace = text(request.deinterlace)
+          ..sizeGuard = text(request.sizeGuard)
+          ..fixedQuality = request.fixedQuality
+          ..recursive = request.recursive ? 1 : 0;
+      }
 
-      final error = runV2 != null
-          ? runV2(optionsV2, callback, Pointer<Void>.fromAddress(0), token)
-          : run!(options, callback, Pointer<Void>.fromAddress(0), token);
+      final error = runV3 != null
+          ? runV3(optionsV3, callback, Pointer<Void>.fromAddress(0), token)
+          : (runV2 != null
+                ? runV2(
+                    optionsV2,
+                    callback,
+                    Pointer<Void>.fromAddress(0),
+                    token,
+                  )
+                : run!(options, callback, Pointer<Void>.fromAddress(0), token));
       if (error.address == 0) {
         return null;
       }
@@ -494,11 +693,174 @@ class _CoreLibrary {
       for (final pointer in strings) {
         calloc.free(pointer);
       }
-      if (runV2 != null) {
+      if (runV3 != null) {
+        calloc.free(optionsV3);
+      } else if (runV2 != null) {
         calloc.free(optionsV2);
       } else {
         calloc.free(options);
       }
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Calls the core to list usable encoders for a codec; returns raw JSON; side effects: runs ffmpeg probes.
+  String listEncoders(String ffmpeg, String codec) {
+    final fn = _listEncoders;
+    if (fn == null) {
+      return '{"encoders":[]}';
+    }
+    final ffmpegPtr = ffmpeg.toNativeUtf8().cast<Char>();
+    final codecPtr = codec.toNativeUtf8().cast<Char>();
+    try {
+      final result = fn(ffmpegPtr, codecPtr);
+      if (result.address == 0) {
+        return '{"encoders":[]}';
+      }
+      final text = result.cast<Utf8>().toDartString();
+      _stringFree?.call(result);
+      return text;
+    } finally {
+      calloc.free(ffmpegPtr);
+      calloc.free(codecPtr);
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Calls the core to probe video metadata for previewing; returns raw JSON; side effects: runs ffprobe.
+  String previewProbe(String ffprobe, String path) {
+    final fn = _previewProbe;
+    if (fn == null) {
+      return '{"error":"preview probe unavailable"}';
+    }
+    final ffprobePtr = ffprobe.toNativeUtf8().cast<Char>();
+    final pathPtr = path.toNativeUtf8().cast<Char>();
+    try {
+      final result = fn(ffprobePtr, pathPtr);
+      if (result.address == 0) {
+        return '{"error":"empty preview probe response"}';
+      }
+      final text = result.cast<Utf8>().toDartString();
+      _stringFree?.call(result);
+      return text;
+    } finally {
+      calloc.free(ffprobePtr);
+      calloc.free(pathPtr);
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Calls the core to extract an aligned comparison frame pair; returns raw JSON; side effects: spawns ffmpeg.
+  String previewFramePair(
+    String ffmpeg,
+    String original,
+    String review,
+    int timestampMs,
+    String outDir,
+    bool includeDiff,
+  ) {
+    final fn = _previewFramePair;
+    if (fn == null) {
+      return '{"error":"frame preview unavailable"}';
+    }
+    final pFfmpeg = ffmpeg.toNativeUtf8().cast<Char>();
+    final pOrig = original.toNativeUtf8().cast<Char>();
+    final pRev = review.toNativeUtf8().cast<Char>();
+    final pOut = outDir.toNativeUtf8().cast<Char>();
+    try {
+      final result = fn(
+        pFfmpeg,
+        pOrig,
+        pRev,
+        timestampMs,
+        pOut,
+        includeDiff ? 1 : 0,
+      );
+      if (result.address == 0) {
+        return '{"error":"empty preview frame response"}';
+      }
+      final text = result.cast<Utf8>().toDartString();
+      _stringFree?.call(result);
+      return text;
+    } finally {
+      calloc.free(pFfmpeg);
+      calloc.free(pOrig);
+      calloc.free(pRev);
+      calloc.free(pOut);
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Calls the core to extract a synchronized frame sequence for live playback; returns raw JSON; side effects: spawns ffmpeg.
+  String previewClipSequence(
+    String ffmpeg,
+    String original,
+    String review,
+    int startMs,
+    int durationMs,
+    int fps,
+    int maxHeight,
+    String outDir,
+  ) {
+    final fn = _previewClipSequence;
+    if (fn == null) {
+      return '{"error":"clip playback unavailable"}';
+    }
+    final pFfmpeg = ffmpeg.toNativeUtf8().cast<Char>();
+    final pOrig = original.toNativeUtf8().cast<Char>();
+    final pRev = review.toNativeUtf8().cast<Char>();
+    final pOut = outDir.toNativeUtf8().cast<Char>();
+    try {
+      final result = fn(
+        pFfmpeg,
+        pOrig,
+        pRev,
+        startMs,
+        durationMs,
+        fps,
+        maxHeight,
+        pOut,
+      );
+      if (result.address == 0) {
+        return '{"error":"empty clip sequence response"}';
+      }
+      final text = result.cast<Utf8>().toDartString();
+      _stringFree?.call(result);
+      return text;
+    } finally {
+      calloc.free(pFfmpeg);
+      calloc.free(pOrig);
+      calloc.free(pRev);
+      calloc.free(pOut);
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Calls the core to export a side-by-side comparison clip; returns null on success or error string; side effects: spawns ffmpeg.
+  String? previewExportClip(
+    String ffmpeg,
+    String original,
+    String review,
+    int startMs,
+    int durationMs,
+    String outPath,
+  ) {
+    final fn = _previewExportClip;
+    if (fn == null) {
+      return 'Clip export is not available in this engine build.';
+    }
+    final pFfmpeg = ffmpeg.toNativeUtf8().cast<Char>();
+    final pOrig = original.toNativeUtf8().cast<Char>();
+    final pRev = review.toNativeUtf8().cast<Char>();
+    final pOut = outPath.toNativeUtf8().cast<Char>();
+    try {
+      final result = fn(pFfmpeg, pOrig, pRev, startMs, durationMs, pOut);
+      if (result.address == 0) {
+        return null;
+      }
+      final text = result.cast<Utf8>().toDartString();
+      _stringFree?.call(result);
+      return text;
+    } finally {
+      calloc.free(pFfmpeg);
+      calloc.free(pOrig);
+      calloc.free(pRev);
+      calloc.free(pOut);
     }
   }
 
@@ -556,6 +918,8 @@ class PendingReview {
     required this.score,
     required this.target,
     required this.deviations,
+    this.durationSeconds,
+    this.worstFrameSeconds,
   });
 
   final String sidecarPath;
@@ -568,6 +932,8 @@ class PendingReview {
   final int? score;
   final int target;
   final List<String> deviations;
+  final double? durationSeconds;
+  final double? worstFrameSeconds;
 
   String get fileName => originalPath.split(RegExp(r'[/\\]')).last;
 
@@ -592,8 +958,181 @@ class PendingReview {
       score: item['score'] as int?,
       target: item['target'] as int? ?? 0,
       deviations: deviations,
+      durationSeconds: (item['duration_seconds'] as num?)?.toDouble(),
+      worstFrameSeconds: (item['worst_frame_seconds'] as num?)?.toDouble(),
     );
   }
+}
+
+/// Probed dimensions and duration for review preview scrubbing.
+class PreviewInfo {
+  const PreviewInfo({
+    required this.durationSeconds,
+    required this.width,
+    required this.height,
+    required this.fps,
+  });
+
+  final double durationSeconds;
+  final int width;
+  final int height;
+  final double fps;
+}
+
+/// Extracted aligned image paths for one comparison timestamp.
+class PreviewFramePair {
+  const PreviewFramePair({
+    required this.originalImage,
+    required this.reviewImage,
+    this.diffImage,
+  });
+
+  final String originalImage;
+  final String reviewImage;
+  final String? diffImage;
+}
+
+/// Extracted synchronized frame paths for live in-app comparison playback.
+class PreviewClipSequence {
+  const PreviewClipSequence({
+    required this.fps,
+    required this.originalFrames,
+    required this.reviewFrames,
+  });
+
+  final int fps;
+  final List<String> originalFrames;
+  final List<String> reviewFrames;
+}
+
+/// Background-isolate wrapper for preview frame extraction and encoder probing.
+class PreviewService {
+  const PreviewService();
+
+  // AI-FUNC-SUMMARY: Lists runtime-verified encoders for a codec on a background isolate; returns encoder names; side effects: runs ffmpeg probes.
+  Future<List<String>> listEncoders(String ffmpeg, String codec) async {
+    if (ffmpeg.trim().isEmpty) {
+      return const [];
+    }
+    final text = await Isolate.run(
+      () => _CoreLibrary.instance.listEncoders(ffmpeg, codec),
+    );
+    try {
+      final decoded = jsonDecode(text) as Map<String, Object?>;
+      return (decoded['encoders'] as List<Object?>? ?? const [])
+          .whereType<String>()
+          .toList();
+    } on FormatException {
+      return const [];
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Probes duration and dimensions of a video on a background isolate; returns metadata; side effects: runs ffprobe.
+  Future<PreviewInfo> probe(String ffprobe, String path) async {
+    final text = await Isolate.run(
+      () => _CoreLibrary.instance.previewProbe(ffprobe, path),
+    );
+    final decoded = jsonDecode(text) as Map<String, Object?>;
+    final error = decoded['error'] as String?;
+    if (error != null) {
+      throw StateError(error);
+    }
+    return PreviewInfo(
+      durationSeconds: (decoded['duration_seconds'] as num? ?? 0).toDouble(),
+      width: decoded['width'] as int? ?? 0,
+      height: decoded['height'] as int? ?? 0,
+      fps: (decoded['fps'] as num? ?? 24).toDouble(),
+    );
+  }
+
+  // AI-FUNC-SUMMARY: Extracts aligned comparison PNG frames on a background isolate; returns frame paths; side effects: runs ffmpeg and writes PNG files.
+  Future<PreviewFramePair> extractFramePair({
+    required String ffmpeg,
+    required String original,
+    required String review,
+    required int timestampMs,
+    required String outDir,
+    bool includeDiff = true,
+  }) async {
+    final text = await Isolate.run(
+      () => _CoreLibrary.instance.previewFramePair(
+        ffmpeg,
+        original,
+        review,
+        timestampMs,
+        outDir,
+        includeDiff,
+      ),
+    );
+    final decoded = jsonDecode(text) as Map<String, Object?>;
+    final error = decoded['error'] as String?;
+    if (error != null) {
+      throw StateError(error);
+    }
+    return PreviewFramePair(
+      originalImage: decoded['original_image']! as String,
+      reviewImage: decoded['review_image']! as String,
+      diffImage: decoded['diff_image'] as String?,
+    );
+  }
+
+  // AI-FUNC-SUMMARY: Extracts synchronized JPEG frame sequences for live playback on a background isolate; returns frame sequence; side effects: runs ffmpeg and writes JPEG files.
+  Future<PreviewClipSequence> extractClipSequence({
+    required String ffmpeg,
+    required String original,
+    required String review,
+    required int startMs,
+    required int durationMs,
+    int fps = 15,
+    int maxHeight = 720,
+    required String outDir,
+  }) async {
+    final text = await Isolate.run(
+      () => _CoreLibrary.instance.previewClipSequence(
+        ffmpeg,
+        original,
+        review,
+        startMs,
+        durationMs,
+        fps,
+        maxHeight,
+        outDir,
+      ),
+    );
+    final decoded = jsonDecode(text) as Map<String, Object?>;
+    final error = decoded['error'] as String?;
+    if (error != null) {
+      throw StateError(error);
+    }
+    return PreviewClipSequence(
+      fps: decoded['fps'] as int? ?? fps,
+      originalFrames: (decoded['original_frames'] as List<Object?>? ?? const [])
+          .whereType<String>()
+          .toList(),
+      reviewFrames: (decoded['review_frames'] as List<Object?>? ?? const [])
+          .whereType<String>()
+          .toList(),
+    );
+  }
+
+  // AI-FUNC-SUMMARY: Exports a short side-by-side comparison MP4 clip on a background isolate; returns null on success or error message; side effects: runs ffmpeg and writes output file.
+  Future<String?> exportClip({
+    required String ffmpeg,
+    required String original,
+    required String review,
+    required int startMs,
+    required int durationMs,
+    required String outPath,
+  }) => Isolate.run(
+    () => _CoreLibrary.instance.previewExportClip(
+      ffmpeg,
+      original,
+      review,
+      startMs,
+      durationMs,
+      outPath,
+    ),
+  );
 }
 
 /// Reads and resolves pending reviews through the core.

@@ -1,5 +1,16 @@
 # Version history
 
+## 0.4.0 — Faster quality checks, flexible policies and review comparison
+
+Tier A quality measurement speedups (`segmented` default check across six 6-second windows with
+2x frame subsampling, 12-second search trials with 2x subsampling, and `xpsnr` / `auto` metric
+modes), expanded container and processing flexibility (`mkv`, `keep`, `--preset`, `fixed`
+quality mode, `--recursive` / `--no-recursive`, `--output-dir`, `--size-guard`, `--audio-policy`,
+`--deinterlace`, runtime encoder selection), decluttered Convert/Progress/Settings screens, and an
+interactive dual-mode Review Comparison view (`ReviewComparePage` backed by `src/preview.rs`).
+FFI ABI upgraded to version 3 (`FfiRunOptionsV3` / `myvidcomp_run_blocking_v3`) with full V1/V2
+compatibility. CLI `0.4.0` and GUI `0.4.0+16` (settings schema v5).
+
 ## 0.3.0 — Unified MyApps-UI presentation
 
 Adopt MyApps-UI v0.1.7 base themes, style-aware floating navigation, shared settings

@@ -12,12 +12,23 @@
 | `myvidcomp_string_free` | function | 释放本库分配的 FFI 字符串，无返回值。 |
 | `myvidcomp_ffi_abi_version` | function | 报告所支持的最新 FFI ABI 版本，返回一个常量。 |
 | `myvidcomp_run_blocking_v1` | function | 为 FFI 调用方运行一整趟转换，并通过 JSON 回调报告进度。 |
+| `myvidcomp_run_blocking_v2` | function | 为接受 V2 解码器偏好选项的 FFI 调用方运行一整趟转换，返回 null 或错误字符串。 |
+| `myvidcomp_run_blocking_v3` | function | 为接受 V3 预设、指标、音频、反交错、体积保护、输出目录与递归选项的 FFI 调用方运行一整趟转换。 |
 | `myvidcomp_review_list` | function | 列出某个文件夹中等待“留哪一份”决定的转换，返回分配好的 JSON 文本。 |
 | `myvidcomp_review_resolve` | function | 对一项待复核内容执行留新、留原或两份都留的决定，成功时返回 null，否则返回分配好的错误字符串。 |
+| `myvidcomp_list_encoders` | function | 探测目标编解码器当前可用的运行时编码器，并返回分配好的 JSON 描述符。 |
+| `myvidcomp_preview_probe` | function | 探测视频的预览元数据并返回分配好的 JSON。 |
+| `myvidcomp_preview_frame_pair` | function | 提取同步的原图/转换后 PNG 帧及可选差异热力图，返回分配好的 JSON 路径。 |
+| `myvidcomp_preview_clip_sequence` | function | 提取用于应用内对比播放的短同步 JPEG 序列，返回分配好的 JSON。 |
+| `myvidcomp_preview_export_clip` | function | 导出 6 秒并排对比 MP4 片段，成功返回 null，否则返回错误字符串。 |
 | `run_ffi_blocking` | function | 为 FFI 调用方运行共用的工作流程，返回 null 或分配好的错误字符串；引擎中的 panic 以错误返回，而不会让宿主程序中止。 |
 | `guard_ffi` | function | 运行一段 FFI 主体，使 panic 变为普通错误，返回主体的值或由 panic 信息构造的错误；用于运行、复核列表和复核决定三个导出函数。 |
 | `panic_message` | function | 从 panic 负载中读出文字，返回该信息，负载不是文字时返回固定短语。 |
 | `run_options_from_ffi_v1` | function | 把带版本的 FFI 运行选项转换为安全的 Rust 运行选项，返回选项或一条校验错误。 |
+| `run_options_from_ffi_v1_fields` | function | 把借用的 V1 选项字段转换为 Rust `RunOptions`，返回选项或一条校验错误。 |
+| `run_options_from_ffi_v2` | function | 把 V2 FFI 运行选项转换为 Rust `RunOptions`，返回选项或一条校验错误。 |
+| `run_options_from_ffi_v2_fields` | function | 把包含解码偏好的借用 V2 选项字段转换为 Rust `RunOptions`，返回选项或一条校验错误。 |
+| `run_options_from_ffi_v3` | function | 把包含扩展容器、速度、指标与保护策略的 V3 FFI 运行选项转换为 Rust `RunOptions`。 |
 | `ffi_choice` | function | 读取一个可选的枚举值 C 字符串并归一化，返回解析出的值或该类型的默认值。 |
 | `ffi_isize` | function | 把 FFI 传入的计数转换为平台整数，返回该计数或一条范围错误。 |
 | `required_ffi_string` | function | 把一个必填的 C 字符串转换为 Rust 字符串，返回该值或校验错误。 |

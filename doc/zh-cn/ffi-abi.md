@@ -8,13 +8,17 @@
 | 版本 | 结构体 | 入口点 |
 |---|---|---|
 | 1 | `FfiRunOptionsV1`（按指针） | `myvidcomp_run_blocking_v1` |
-| 2（当前） | `FfiRunOptionsV2`（按指针） | `myvidcomp_run_blocking_v2` |
+| 2 | `FfiRunOptionsV2`（按指针） | `myvidcomp_run_blocking_v2` |
+| 3（当前） | `FfiRunOptionsV3`（按指针） | `myvidcomp_run_blocking_v3` |
 
 版本 1 是本名称下的第一个版本。上一个项目导出过三个结构体版本；它们已经不复存在，那个永远无法安全
 扩展的按值结构体也一并移除。
 
 版本 2 增加了 `decoder_preference`，并且整体嵌入版本 1 而不是重复它的字段，这样两种布局不会走样。
-仍然使用版本 1 的调用方照常工作，并取得默认值：在确认显卡可用于该文件时使用显卡。
+版本 3 整体嵌入 `FfiRunOptionsV2`，并新增 `encoder_preset`、`quality_metric`、`output_dir`、
+`audio_policy`、`deinterlace`、`size_guard`、`fixed_quality` 和 `recursive`。仍然使用版本 1 或
+版本 2 的调用方照常工作，并自动获取默认值（`balanced`、`vmaf`、无输出镜像目录、`copy`、`skip`、
+`off`、未设定固定画质以及启用递归扫描）。
 
 规则：
 
@@ -39,15 +43,21 @@
 
 | 函数 | 用途 |
 |---|---|
-| `myvidcomp_ffi_abi_version` | 报告支持的最新版本 |
+| `myvidcomp_ffi_abi_version` | 报告支持的最新版本（`3`） |
 | `myvidcomp_run_blocking_v1` | 运行一次转换并报告事件 |
 | `myvidcomp_run_blocking_v2` | 同上，供同时选择解码方式的调用方使用 |
+| `myvidcomp_run_blocking_v3` | 同上，供传入扩展预设、指标、音频、反交错、体积保护、输出目录和递归选项的调用方使用 |
 | `myvidcomp_cancellation_token_new` | 分配一个取消令牌 |
 | `myvidcomp_cancellation_token_request_stop` | 请求优雅停止 |
 | `myvidcomp_cancellation_token_free` | 释放取消令牌 |
 | `myvidcomp_string_free` | 释放库返回的字符串 |
 | `myvidcomp_review_list` | 列出等待决定的转换 |
 | `myvidcomp_review_resolve` | 对一项待决定的转换应用一个决定 |
+| `myvidcomp_list_encoders` | 探测目标编码当前可用的运行时编码器，并以 JSON 返回 |
+| `myvidcomp_preview_probe` | 探测用于对比试看的视频时长与分辨率信息 |
+| `myvidcomp_preview_frame_pair` | 提取原文件与转换结果的同步 PNG 静帧及可选差异热力图 |
+| `myvidcomp_preview_clip_sequence` | 提取短同步 JPEG 帧序列供应用内 A/B 或分屏播放 |
+| `myvidcomp_preview_export_clip` | 导出 6 秒并排对比 MP4 片段 |
 
 运行入口点返回空指针表示成功；非空的错误字符串必须用 `myvidcomp_string_free` 释放。所有字符串指针
 都是以 NUL 结尾的 UTF-8，在调用期间有效。回调必须在返回前复制 JSON 事件字符串，并且不得让 panic

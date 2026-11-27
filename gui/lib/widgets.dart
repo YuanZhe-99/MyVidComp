@@ -3,37 +3,66 @@ import 'package:myapps_ui/myapps_ui.dart';
 
 /// A titled block of related settings.
 class SectionCard extends StatelessWidget {
-  // AI-FUNC-SUMMARY: Purpose: Bind a themed business section; Inputs: title, content and optional heading details; Returns: SectionCard; Side effects: None; Notes: shared headings own typography.
+  // AI-FUNC-SUMMARY: Purpose: Bind a themed business section; Inputs: title, content and optional heading details; Returns: SectionCard; Side effects: None; Notes: renders icon inline with the title for clean vertical density.
   const SectionCard({
     super.key,
     required this.title,
     required this.children,
     this.subtitle,
     this.leading,
+    this.trailing,
   });
 
   final String title;
   final String? subtitle;
   final Widget? leading;
+  final Widget? trailing;
   final List<Widget> children;
 
   @override
   // AI-FUNC-SUMMARY: Purpose: Render a business card with shared section styling; Inputs: context; Returns: Widget; Side effects: None; Notes: shapes and surfaces come from the shared theme.
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: MyAppsSettingsSection(
-          title: title,
-          headingPadding: const EdgeInsets.only(bottom: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (leading != null || subtitle != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: leading,
-                subtitle: subtitle == null ? null : Text(subtitle!),
+            Row(
+              children: [
+                if (leading != null) ...[
+                  IconTheme(
+                    data: IconThemeData(
+                      size: 20,
+                      color: theme.colorScheme.primary,
+                    ),
+                    child: leading!,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+                ?trailing,
+              ],
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                subtitle!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
+            ],
+            const SizedBox(height: 14),
             ...children,
           ],
         ),

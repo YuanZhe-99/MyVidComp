@@ -9,7 +9,9 @@ Checking a finished file against its source and putting it in place. Described f
 | `chapter_validation_error` | function | Compares expected and output chapter count, timestamps, and exact titles, returning detailed mismatch with practical timestamp tolerance or none. |
 | `pixel_format_validation_error` | function | Provides pixel format validation error behavior, returning the declared result. |
 | `validate_stream_signature` | function | Validates validate stream signature conditions, returning success, failure, or test assertion result. |
+| `validate_stream_signature_with_audio` | function | Validates output stream signatures while allowing expected AAC codec changes on transcoded audio tracks, returning success or an error. |
 | `stream_signature_validation_error` | function | Provides stream signature validation error behavior, returning the declared result. |
+| `stream_signature_validation_error_with_audio` | function | Compares source and output stream signatures with an optional set of transcoded audio indexes, returning mismatch detail or none. |
 | `display_metadata_validation_error` | function | Provides display metadata validation error behavior, returning the declared result. |
 | `display_metadata_matches` | function | Compares display metadata with rational tolerance for aspect ratios, returning true when values are equivalent enough for validation. |
 | `rational_metadata_matches` | function | Compares rational metadata values with a small tolerance for container rewrites, returning true when ratios are visually equivalent. |

@@ -25,5 +25,6 @@ Conversions kept beside their originals for the user to decide about. Described 
 | `review_summary_line` | function | Describes a review item for terminal output, returning one summary line. |
 | `field` | function | Reads one string field out of a sidecar document, returning the unescaped value or none. |
 | `number` | function | Reads one numeric field out of a sidecar document, returning the value or none for a missing or null field. |
+| `float_number` | function | Reads one optional floating-point field out of a sidecar document, returning a finite `f64` or none. |
 | `deviations` | function | Reads the deviation list out of a sidecar document, returning every recorded change, including text that holds brackets or quotes. |
 | `closing_bracket` | function | Finds the `]` that closes a JSON array, skipping any inside a quoted string, returning its offset or none when the array never closes. |

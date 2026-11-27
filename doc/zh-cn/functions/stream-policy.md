@@ -9,7 +9,9 @@
 | `chapters_are_placeholder_or_empty` | function | 把没有章节、或只有一个无名且覆盖整个时长的章节判定为空占位，在实际封装器时间戳容差内返回真。 |
 | `parse_bmff_chapter_targets` | function | 读取 ISO BMFF 结构，收集被 tref/chap 引用明确指向的轨道 ID。 |
 | `matroska_incompatible_stream_reason` | function | 找出一条被映射的非主要流，其类型在保守规则下无法复制进 Matroska，返回实际的索引/类型/编码细节或无。 |
+| `select_output_container_for_source` | function | 按 `OutputFormat` 与 `AudioPolicy` 兼容规则选择输出容器，返回容器或跳过原因。 |
 | `mp4_incompatible_stream_reason` | function | 找出第一条无法复制进 MP4 容器的非主要流，返回一条细节说明或无。 |
+| `mp4_incompatible_stream_reason_with_policy` | function | 按照当前生效的 `AudioPolicy` 评估 MP4 流复制兼容性，返回细节原因或无。 |
 | `is_mp4_copy_compatible_stream` | function | 检查一条非主要流能否复制进 MP4 目标，流类型/编码受支持时返回真。 |
 | `is_mp4_video_codec` | function | 检查被复制的非主要视频编码是否兼容 MP4，返回一个布尔值。 |
 | `is_mp4_audio_codec` | function | 检查是否为 MP4 音频编码，返回一个布尔值。 |

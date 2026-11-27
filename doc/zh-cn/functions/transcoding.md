@@ -16,6 +16,8 @@
 | `plan_deviations` | function | 列出一个编码方案引入的可挽回差异，为每一项返回类别和一句说明。 |
 | `pixel_format_deviation` | function | 把像素格式转换描述为可挽回的差异，返回 `pixel_format` 类别和一句面向读者的说明。 |
 | `assess_quality` | function | 测量一次完成的转换，并判定它是否需要人来决定，返回该结果。 |
+| `measure_quality_with_progress` | function | 按配置的指标（`vmaf`、`xpsnr` 或 `auto`）与检测深度评估输出画质并同步更新进度界面。 |
+| `measure_with_metric` | function | 对源流运行 VMAF（`segmented`/`sampled`/`full`）或 XPSNR 测量，返回画质测量结果。 |
 | `finish_conversion` | function | 提交一次完成的转换，或替换原文件，或两份都留待复核，返回转换前后的体积或一条终止性错误。 |
 | `commit_for_review` | function | 把完成的转换放到未被触动的原文件旁边，并记录它为何需要决定，返回转换前后的体积或一条终止性错误。 |
 | `execute_transcode_attempt` | function | 执行一次精确或明确适配的编码器尝试但不提交，返回成功或分类过的失败。 |
@@ -34,6 +36,7 @@
 | `file_size` | function | 提供文件体积的行为，返回声明的结果。 |
 | `build_ffmpeg_args` | function | 为一次普通的精确 AV1 尝试构造 ffmpeg 参数，供测试使用，返回命令参数。 |
 | `build_ffmpeg_args_for_plan` | function | 为一次编码尝试构造 ffmpeg 参数，返回命令参数。 |
+| `build_ffmpeg_args_for_plan_with_preset` | function | 为一次编码尝试构造包含编码预设、音频转码与可选 `bwdif` 反交错的 ffmpeg 参数。 |
 | `ensure_metadata_bsf` | function | 检查当前 ffmpeg 构建是否带有某一种编码记录色彩元数据所需的比特流过滤器，返回成功或一条面向用户的错误。 |
 | `repair_av1_metadata` | function | 重封装临时输出以改写 AV1 色彩元数据，返回成功或修复错误；会先删除残留的修复文件。 |
 | `build_av1_metadata_repair_args` | function | 构造或推导 AV1 元数据修复参数，返回算得的值。 |
@@ -57,6 +60,7 @@
 | `quality_value_arg` | function | 按编码器期望的写法格式化一个恒定画质值，返回参数文本。 |
 | `mediacodec_args` | function | 构造每一次 Android 硬件编码都需要的参数，返回参数列表。 |
 | `encoder_quality_args` | function | 为一个编码器在一个设置下构造画质参数，返回参数列表。 |
+| `encoder_quality_args_with_preset` | function | 构造画质参数以及映射到编码器原生标志的抽象预设参数，返回参数列表。 |
 | `run_ffmpeg_with_progress` | function | 运行 ffmpeg 并同时报告进度，返回退出状态与捕获的 stderr，或进程管理错误。 |
 | `read_to_string` | function | 把一个流读到结尾作为文字，替换无效的 UTF-8 字节，返回文字或读取错误。 |
 | `abandon_child` | function | 停止调用方已无法跟踪的 ffmpeg 子进程，无返回值；终止并回收它，并等待其 stderr 读取线程结束。 |

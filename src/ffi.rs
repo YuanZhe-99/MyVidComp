@@ -18,19 +18,22 @@ use std::path::PathBuf;
 use std::ptr;
 
 use super::{
-    CancellationToken, DecoderPreference, Event, EventSink, Preservation, QualityCheck,
-    QualityMode, RunOptions, TargetCodec, default_runtime_binary, event_json, list_reviews,
-    normalize_decoder_preference_choice, normalize_encoder_choice,
-    normalize_encoder_preference_choice, normalize_output_format_choice,
-    normalize_preservation_choice, normalize_quality_check_choice, normalize_quality_mode_choice,
-    normalize_target_codec_choice, resolve_review, review_list_json, run_with_events,
+    AudioPolicy, CancellationToken, DecoderPreference, DeinterlacePolicy, EncoderPreset, Event,
+    EventSink, Preservation, QualityCheck, QualityMetric, QualityMode, RunOptions, SizeGuard,
+    TargetCodec, default_runtime_binary, event_json, list_reviews, normalize_audio_policy_choice,
+    normalize_decoder_preference_choice, normalize_deinterlace_policy_choice,
+    normalize_encoder_choice, normalize_encoder_preference_choice, normalize_encoder_preset_choice,
+    normalize_output_format_choice, normalize_preservation_choice, normalize_quality_check_choice,
+    normalize_quality_metric_choice, normalize_quality_mode_choice, normalize_size_guard_choice,
+    normalize_target_codec_choice, preview, resolve_review, review_list_json, run_with_events,
     validate_quality_target,
 };
 
 /// Newest ABI version this library exports.
-pub const MYVIDCOMP_FFI_ABI_VERSION: u32 = 2;
+pub const MYVIDCOMP_FFI_ABI_VERSION: u32 = 3;
 const RUN_OPTIONS_V1_ABI_VERSION: u32 = 1;
 const RUN_OPTIONS_V2_ABI_VERSION: u32 = 2;
+const RUN_OPTIONS_V3_ABI_VERSION: u32 = 3;
 
 /// Run options for ABI version 1.
 ///
@@ -73,6 +76,25 @@ pub struct FfiRunOptionsV2 {
     /// Whether the source may be decoded on a graphics card: auto, gpu, cpu,
     /// or one of ffmpeg's method names.
     pub decoder_preference: *const c_char,
+}
+
+/// Run options for ABI version 3.
+///
+/// Embeds version 2 whole (pointers first, then 32-bit ints, then byte flags)
+/// so V1 and V2 layouts remain completely untouched.
+#[repr(C)]
+pub struct FfiRunOptionsV3 {
+    pub v2: FfiRunOptionsV2,
+    pub encoder_preset: *const c_char,
+    pub quality_metric: *const c_char,
+    pub output_dir: *const c_char,
+    pub audio_policy: *const c_char,
+    pub deinterlace: *const c_char,
+    pub size_guard: *const c_char,
+    /// Fixed CRF/QP in hundredths when `quality_mode` is `fixed`. Zero means unset.
+    pub fixed_quality: u32,
+    /// Nonzero scans subdirectories recursively; zero scans only top-level.
+    pub recursive: u8,
 }
 
 #[repr(C)]
@@ -158,6 +180,27 @@ pub extern "C" fn myvidcomp_ffi_abi_version() -> u32 {
 }
 
 #[unsafe(no_mangle)]
+#[doc = "# Safety\n`options` must be null or point to a valid `FfiRunOptionsV3` with `abi_version` 3 and `struct_size` covering `FfiRunOptionsV3`. All non-null string pointers must be valid NUL-terminated UTF-8 for the call duration."]
+// AI-FUNC-SUMMARY:
+// Purpose: Runs a full conversion pass for callers supplying ABI version 3 extended options.
+// Inputs: Pointer to version 3 run options, optional event callback and user data, and optional cancellation token.
+// Returns: Null on success, or an allocated error string freed with myvidcomp_string_free.
+// Side effects: Scans files, runs ffmpeg/ffprobe, writes temporary/output files, and emits events synchronously.
+pub unsafe extern "C" fn myvidcomp_run_blocking_v3(
+    options: *const FfiRunOptionsV3,
+    callback: Option<FfiEventCallback>,
+    user_data: *mut c_void,
+    token: *const CancellationToken,
+) -> *mut c_char {
+    let options = match unsafe { run_options_from_ffi_v3(options) } {
+        Ok(options) => options,
+        Err(err) => return ffi_string_ptr(err),
+    };
+
+    run_ffi_blocking(options, callback, user_data, token)
+}
+
+#[unsafe(no_mangle)]
 #[doc = "# Safety\n`options` must be null or point to an allocation containing at least the `abi_version` and `struct_size` fields. ABI V2 requires `abi_version` 2; when `struct_size` covers `FfiRunOptionsV2`, the remaining fields must be valid. All non-null string pointers must point to valid NUL-terminated UTF-8 for the duration of the call. `token` must be null or a valid live cancellation token pointer. The callback must copy the JSON string before returning and must not unwind across the FFI boundary."]
 // AI-FUNC-SUMMARY:
 // Purpose: Runs a full conversion pass for callers that also choose how decoding happens.
@@ -234,6 +277,203 @@ pub unsafe extern "C" fn myvidcomp_review_resolve(
 
     match guard_ffi(|| resolve_review(&sidecar, &decision), Err) {
         Ok(()) => ptr::null_mut(),
+        Err(err) => ffi_string_ptr(err),
+    }
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`ffmpeg` and `codec` must be valid NUL-terminated UTF-8 pointers. Returned string must be freed with myvidcomp_string_free."]
+// AI-FUNC-SUMMARY: Lists runtime-verified encoders for a target codec as JSON; returns allocated JSON string; side effects: runs ffmpeg encoder probes.
+pub unsafe extern "C" fn myvidcomp_list_encoders(
+    ffmpeg: *const c_char,
+    codec: *const c_char,
+) -> *mut c_char {
+    let ffmpeg = match unsafe { required_ffi_string(ffmpeg, "ffmpeg") } {
+        Ok(val) => val,
+        Err(err) => {
+            return ffi_string_ptr(format!(
+                "{{\"encoders\":[],\"error\":{}}}",
+                json_escape(&err)
+            ));
+        }
+    };
+    let codec_str = unsafe { optional_ffi_string(codec, "codec") }
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "av1".to_string());
+    let target_codec = match normalize_target_codec_choice(&codec_str) {
+        Ok(Some(c)) => c,
+        Ok(None) => TargetCodec::Av1,
+        Err(err) => {
+            return ffi_string_ptr(format!(
+                "{{\"encoders\":[],\"error\":{}}}",
+                json_escape(&err)
+            ));
+        }
+    };
+    ffi_string_ptr(guard_ffi(
+        || preview::list_usable_encoders_json(&ffmpeg, target_codec),
+        |panic| format!("{{\"encoders\":[],\"error\":{}}}", json_escape(&panic)),
+    ))
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`ffprobe` and `path` must be valid NUL-terminated UTF-8 pointers. Returned string must be freed with myvidcomp_string_free."]
+// AI-FUNC-SUMMARY: Probes duration, resolution, and frame rate of a video file for review previewing; returns allocated JSON string; side effects: runs ffprobe.
+pub unsafe extern "C" fn myvidcomp_preview_probe(
+    ffprobe: *const c_char,
+    path: *const c_char,
+) -> *mut c_char {
+    let ffprobe = match unsafe { required_ffi_string(ffprobe, "ffprobe") } {
+        Ok(val) => val,
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let path = match unsafe { required_ffi_string(path, "path") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    ffi_string_ptr(guard_ffi(
+        || match preview::probe_preview_info(&ffprobe, &path) {
+            Ok(info) => preview::preview_info_json(&info),
+            Err(err) => format!("{{\"error\":{}}}", json_escape(&err)),
+        },
+        |panic| format!("{{\"error\":{}}}", json_escape(&panic)),
+    ))
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`ffmpeg`, `original`, `review`, and `out_dir` must be valid NUL-terminated UTF-8 pointers. Returned string must be freed with myvidcomp_string_free."]
+// AI-FUNC-SUMMARY: Extracts aligned comparison PNG frames (and optional difference heatmap) for a review pair; returns allocated JSON string; side effects: spawns ffmpeg and writes PNG files.
+pub unsafe extern "C" fn myvidcomp_preview_frame_pair(
+    ffmpeg: *const c_char,
+    original: *const c_char,
+    review: *const c_char,
+    timestamp_ms: u64,
+    out_dir: *const c_char,
+    include_diff: u8,
+) -> *mut c_char {
+    let ffmpeg = match unsafe { required_ffi_string(ffmpeg, "ffmpeg") } {
+        Ok(val) => val,
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let original = match unsafe { required_ffi_string(original, "original") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let review = match unsafe { required_ffi_string(review, "review") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let out_dir = match unsafe { required_ffi_string(out_dir, "out_dir") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    ffi_string_ptr(guard_ffi(
+        || match preview::extract_frame_pair(
+            &ffmpeg,
+            &original,
+            &review,
+            timestamp_ms,
+            &out_dir,
+            include_diff != 0,
+        ) {
+            Ok(pair) => preview::frame_pair_json(&pair),
+            Err(err) => format!("{{\"error\":{}}}", json_escape(&err)),
+        },
+        |panic| format!("{{\"error\":{}}}", json_escape(&panic)),
+    ))
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`ffmpeg`, `original`, `review`, and `out_dir` must be valid NUL-terminated UTF-8 pointers. Returned string must be freed with myvidcomp_string_free."]
+// AI-FUNC-SUMMARY: Extracts synchronized JPEG frame sequences for live in-app review playback; returns allocated JSON string; side effects: spawns ffmpeg and writes JPEG files.
+pub unsafe extern "C" fn myvidcomp_preview_clip_sequence(
+    ffmpeg: *const c_char,
+    original: *const c_char,
+    review: *const c_char,
+    start_ms: u64,
+    duration_ms: u64,
+    fps: u32,
+    max_height: u32,
+    out_dir: *const c_char,
+) -> *mut c_char {
+    let ffmpeg = match unsafe { required_ffi_string(ffmpeg, "ffmpeg") } {
+        Ok(val) => val,
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let original = match unsafe { required_ffi_string(original, "original") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let review = match unsafe { required_ffi_string(review, "review") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    let out_dir = match unsafe { required_ffi_string(out_dir, "out_dir") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(format!("{{\"error\":{}}}", json_escape(&err))),
+    };
+    ffi_string_ptr(guard_ffi(
+        || match preview::extract_clip_sequence(
+            &ffmpeg,
+            &original,
+            &review,
+            preview::ClipSequenceOptions {
+                start_ms,
+                duration_ms,
+                fps,
+                max_height,
+            },
+            &out_dir,
+        ) {
+            Ok(seq) => preview::clip_sequence_json(&seq),
+            Err(err) => format!("{{\"error\":{}}}", json_escape(&err)),
+        },
+        |panic| format!("{{\"error\":{}}}", json_escape(&panic)),
+    ))
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`ffmpeg`, `original`, `review`, and `out_path` must be valid NUL-terminated UTF-8 pointers. Returned string must be freed with myvidcomp_string_free."]
+// AI-FUNC-SUMMARY: Exports a short side-by-side MP4 comparison clip for external playback; returns null on success or allocated error string; side effects: spawns ffmpeg and writes out_path.
+pub unsafe extern "C" fn myvidcomp_preview_export_clip(
+    ffmpeg: *const c_char,
+    original: *const c_char,
+    review: *const c_char,
+    start_ms: u64,
+    duration_ms: u64,
+    out_path: *const c_char,
+) -> *mut c_char {
+    let ffmpeg = match unsafe { required_ffi_string(ffmpeg, "ffmpeg") } {
+        Ok(val) => val,
+        Err(err) => return ffi_string_ptr(err),
+    };
+    let original = match unsafe { required_ffi_string(original, "original") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(err),
+    };
+    let review = match unsafe { required_ffi_string(review, "review") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(err),
+    };
+    let out_path = match unsafe { required_ffi_string(out_path, "out_path") } {
+        Ok(val) => PathBuf::from(val),
+        Err(err) => return ffi_string_ptr(err),
+    };
+    match guard_ffi(
+        || {
+            preview::export_comparison_clip(
+                &ffmpeg,
+                &original,
+                &review,
+                start_ms,
+                duration_ms,
+                &out_path,
+            )
+        },
+        Err,
+    ) {
+        Ok(_) => ptr::null_mut(),
         Err(err) => ffi_string_ptr(err),
     }
 }
@@ -390,6 +630,14 @@ unsafe fn run_options_from_ffi_v1_fields(options: &FfiRunOptionsV1) -> Result<Ru
         // Version 1 has no say in this, so it gets the default: a graphics
         // card when one is proven to work on the file.
         decoder_preference: DecoderPreference::default(),
+        encoder_preset: EncoderPreset::default(),
+        quality_metric: QualityMetric::default(),
+        fixed_quality: None,
+        recursive: true,
+        output_dir: None,
+        size_guard: SizeGuard::default(),
+        audio_policy: AudioPolicy::default(),
+        deinterlace: DeinterlacePolicy::default(),
     })
 }
 
@@ -415,9 +663,11 @@ unsafe fn run_options_from_ffi_v2(options: *const FfiRunOptionsV2) -> Result<Run
         ));
     }
 
-    let options = unsafe { &*options };
-    // Everything version 1 knows about is laid out identically, so the shared
-    // fields are read once through that view rather than copied out twice.
+    unsafe { run_options_from_ffi_v2_fields(&*options) }
+}
+
+// AI-FUNC-SUMMARY: Reads version 2 fields from a validated V2 or V3 options struct; returns options or validation error; side effects: reads C strings through raw pointers.
+unsafe fn run_options_from_ffi_v2_fields(options: &FfiRunOptionsV2) -> Result<RunOptions, String> {
     let mut base = unsafe { run_options_from_ffi_v1_fields(&options.v1) }?;
     base.decoder_preference = unsafe {
         ffi_choice(
@@ -426,6 +676,72 @@ unsafe fn run_options_from_ffi_v2(options: *const FfiRunOptionsV2) -> Result<Run
             normalize_decoder_preference_choice,
         )
     }?;
+    Ok(base)
+}
+
+// AI-FUNC-SUMMARY: Converts version 3 FFI run options into safe Rust run options; returns options or a validation error; side effects: reads the versioned struct and C strings through raw pointers.
+unsafe fn run_options_from_ffi_v3(options: *const FfiRunOptionsV3) -> Result<RunOptions, String> {
+    if options.is_null() {
+        return Err("options pointer is required".to_string());
+    }
+
+    let header = unsafe { &*options.cast::<FfiOptionsHeader>() };
+    if header.abi_version != RUN_OPTIONS_V3_ABI_VERSION {
+        return Err(format!(
+            "unsupported FFI ABI version {}; myvidcomp_run_blocking_v3 requires version {RUN_OPTIONS_V3_ABI_VERSION}",
+            header.abi_version
+        ));
+    }
+
+    let expected_size = size_of::<FfiRunOptionsV3>() as u32;
+    if header.struct_size < expected_size {
+        return Err(format!(
+            "FFI options struct is too small: {} < {expected_size}",
+            header.struct_size
+        ));
+    }
+
+    let options = unsafe { &*options };
+    let mut base = unsafe { run_options_from_ffi_v2_fields(&options.v2) }?;
+    base.encoder_preset = unsafe {
+        ffi_choice(
+            options.encoder_preset,
+            "encoder_preset",
+            normalize_encoder_preset_choice,
+        )
+    }?;
+    base.quality_metric = unsafe {
+        ffi_choice(
+            options.quality_metric,
+            "quality_metric",
+            normalize_quality_metric_choice,
+        )
+    }?;
+    base.output_dir =
+        unsafe { optional_ffi_string(options.output_dir, "output_dir") }?.map(PathBuf::from);
+    base.audio_policy = unsafe {
+        ffi_choice(
+            options.audio_policy,
+            "audio_policy",
+            normalize_audio_policy_choice,
+        )
+    }?;
+    base.deinterlace = unsafe {
+        ffi_choice(
+            options.deinterlace,
+            "deinterlace",
+            normalize_deinterlace_policy_choice,
+        )
+    }?;
+    base.size_guard = unsafe {
+        ffi_choice(
+            options.size_guard,
+            "size_guard",
+            normalize_size_guard_choice,
+        )
+    }?;
+    base.fixed_quality = (options.fixed_quality > 0).then_some(options.fixed_quality);
+    base.recursive = ffi_bool(options.recursive);
     Ok(base)
 }
 
@@ -545,7 +861,7 @@ mod tests {
         assert_eq!(converted.target_codec, TargetCodec::Av1);
         assert_eq!(converted.preservation, Preservation::Flexible);
         assert_eq!(converted.quality_mode, QualityMode::Search);
-        assert_eq!(converted.quality_check, QualityCheck::Sampled);
+        assert_eq!(converted.quality_check, QualityCheck::Segmented);
         assert_eq!(
             converted.quality_target,
             RunOptions::default().quality_target
@@ -613,11 +929,12 @@ mod tests {
     // AI-FUNC-SUMMARY: Verifies the exported ABI version constant matches the accessor; returns nothing; side effects: none.
     fn reports_abi_version() {
         assert_eq!(myvidcomp_ffi_abi_version(), MYVIDCOMP_FFI_ABI_VERSION);
-        assert_eq!(MYVIDCOMP_FFI_ABI_VERSION, 2);
+        assert_eq!(MYVIDCOMP_FFI_ABI_VERSION, 3);
         // Version 1 keeps its own number, because a caller built against it
         // still sends that in the header it fills in.
         assert_eq!(RUN_OPTIONS_V1_ABI_VERSION, 1);
         assert_eq!(RUN_OPTIONS_V2_ABI_VERSION, 2);
+        assert_eq!(RUN_OPTIONS_V3_ABI_VERSION, 3);
     }
 }
 
@@ -724,5 +1041,43 @@ mod v2_tests {
         let error = unsafe { run_options_from_ffi_v2(&options) }.unwrap_err();
 
         assert!(error.contains("too small"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies version 3 parses extended options while preserving V2 and V1 embedded fields; returns nothing; side effects: none.
+    fn version_three_reads_extended_options() {
+        let folder = CString::new("/videos").unwrap();
+        let preset = CString::new("slow").unwrap();
+        let metric = CString::new("auto").unwrap();
+        let out_dir = CString::new("/out").unwrap();
+        let audio = CString::new("transcode-incompatible").unwrap();
+        let deinterlace = CString::new("bwdif").unwrap();
+        let size_guard = CString::new("review").unwrap();
+
+        let mut v2 = base_options_v2(&folder);
+        v2.v1.abi_version = RUN_OPTIONS_V3_ABI_VERSION;
+        v2.v1.struct_size = size_of::<FfiRunOptionsV3>() as u32;
+
+        let v3 = FfiRunOptionsV3 {
+            v2,
+            encoder_preset: preset.as_ptr(),
+            quality_metric: metric.as_ptr(),
+            output_dir: out_dir.as_ptr(),
+            audio_policy: audio.as_ptr(),
+            deinterlace: deinterlace.as_ptr(),
+            size_guard: size_guard.as_ptr(),
+            fixed_quality: 2650,
+            recursive: 0,
+        };
+
+        let parsed = unsafe { run_options_from_ffi_v3(&v3) }.unwrap();
+        assert_eq!(parsed.encoder_preset, EncoderPreset::Slow);
+        assert_eq!(parsed.quality_metric, QualityMetric::Auto);
+        assert_eq!(parsed.output_dir, Some(PathBuf::from("/out")));
+        assert_eq!(parsed.audio_policy, AudioPolicy::TranscodeIncompatible);
+        assert_eq!(parsed.deinterlace, DeinterlacePolicy::Bwdif);
+        assert_eq!(parsed.size_guard, SizeGuard::Review);
+        assert_eq!(parsed.fixed_quality, Some(2650));
+        assert!(!parsed.recursive);
     }
 }

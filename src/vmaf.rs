@@ -10,9 +10,24 @@ use std::path::Path;
 use std::process::Stdio;
 
 use super::{
-    HwAccel, PROGRESS_ARGS, VideoInfo, first_error_line, normalized_pix_fmt,
+    HwAccel, PROGRESS_ARGS, QualityMetric, VideoInfo, first_error_line, normalized_pix_fmt,
     pixel_format_bit_depth, process_command,
 };
+
+/// Result of a quality measurement, including an optional worst-quality timestamp.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QualityMeasurement {
+    pub score: VmafScore,
+    pub worst_frame_seconds: Option<f64>,
+    pub metric: QualityMetric,
+}
+
+/// One short window for segmented quality checking.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SegmentWindow {
+    pub start_seconds: f64,
+    pub duration_seconds: f64,
+}
 
 /// A measured quality score, kept in hundredths of a VMAF point so it can cross
 /// the FFI boundary as an integer.
@@ -90,6 +105,23 @@ pub fn detect_vmaf_support(ffmpeg: &str) -> (VmafSupport, Option<String>) {
             )),
         ),
     }
+}
+
+// AI-FUNC-SUMMARY: Checks whether this FFmpeg build carries the fast built-in xpsnr filter; returns true when present; side effects: runs ffmpeg once to inspect the filter.
+pub fn detect_xpsnr_support(ffmpeg: &str) -> bool {
+    let output = process_command(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-h", "filter=xpsnr"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    let Ok(output) = output else {
+        return false;
+    };
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    output.status.success() && text.contains("Filter xpsnr")
 }
 
 // AI-FUNC-SUMMARY:
@@ -181,6 +213,240 @@ pub fn build_vmaf_cuda_args(
         "-".to_string(),
     ]);
     args
+}
+
+/// Minimum duration for segmented spot checking; shorter clips are checked in full.
+const MIN_SEGMENTED_SECONDS: f64 = 60.0;
+/// Duration of each segmented spot-check window in seconds.
+const SEGMENT_WINDOW_SECONDS: f64 = 6.0;
+/// Maximum number of windows in a segmented spot check.
+const MAX_SEGMENT_WINDOWS: usize = 6;
+
+// AI-FUNC-SUMMARY: Plans evenly spaced short windows across a video for fast segmented quality checking; returns windows or none when the file is short enough to check whole; side effects: none.
+pub fn segmented_plan(duration_seconds: f64) -> Option<Vec<SegmentWindow>> {
+    if !duration_seconds.is_finite() || duration_seconds < MIN_SEGMENTED_SECONDS {
+        return None;
+    }
+
+    let count = ((duration_seconds / 180.0).ceil() as usize).clamp(3, MAX_SEGMENT_WINDOWS);
+    let usable_start = duration_seconds * 0.10;
+    let usable_end = (duration_seconds * 0.90 - SEGMENT_WINDOW_SECONDS).max(usable_start);
+    if usable_end <= usable_start {
+        return None;
+    }
+
+    let windows = (0..count)
+        .map(|index| {
+            let fraction = if count == 1 {
+                0.5
+            } else {
+                index as f64 / (count - 1) as f64
+            };
+            SegmentWindow {
+                start_seconds: usable_start + (usable_end - usable_start) * fraction,
+                duration_seconds: SEGMENT_WINDOW_SECONDS,
+            }
+        })
+        .collect();
+    Some(windows)
+}
+
+// AI-FUNC-SUMMARY: Builds ffmpeg arguments for one seeked segmented VMAF window so decoding skips the rest of the file; returns the argument list; side effects: none.
+pub fn build_segmented_vmaf_args(
+    distorted: &Path,
+    reference: &Path,
+    video: &VideoInfo,
+    options: VmafOptions,
+    window: SegmentWindow,
+    progress: bool,
+    accel: (Option<HwAccel>, Option<HwAccel>),
+) -> Vec<String> {
+    let format = comparison_pixel_format(video);
+    let model = model_for(video);
+    let threads = if options.threads == 0 {
+        std::thread::available_parallelism()
+            .map(|value| value.get() as u32)
+            .unwrap_or(1)
+    } else {
+        options.threads
+    };
+    let subsample = options.subsample.max(1);
+
+    let filter = format!(
+        "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[dist];\
+         [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
+         [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest"
+    );
+
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-nostdin".to_string(),
+        "-loglevel".to_string(),
+        "info".to_string(),
+        "-nostats".to_string(),
+    ];
+    if progress {
+        args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
+    }
+    let start = format!("{:.3}", window.start_seconds);
+    let duration = format!("{:.3}", window.duration_seconds);
+    for (path, method) in [(distorted, accel.0), (reference, accel.1)] {
+        if let Some(method) = method {
+            args.push("-hwaccel".to_string());
+            args.push(method.as_str().to_string());
+        }
+        args.extend([
+            "-ss".to_string(),
+            start.clone(),
+            "-t".to_string(),
+            duration.clone(),
+            "-i".to_string(),
+            path.to_string_lossy().to_string(),
+        ]);
+    }
+
+    args.extend([
+        "-lavfi".to_string(),
+        filter,
+        "-f".to_string(),
+        "null".to_string(),
+        "-".to_string(),
+    ]);
+    args
+}
+
+// AI-FUNC-SUMMARY: Builds ffmpeg arguments to measure perceptual quality with the fast built-in xpsnr filter; returns the argument list; side effects: none.
+pub fn build_xpsnr_args(
+    distorted: &Path,
+    reference: &Path,
+    video: &VideoInfo,
+    window: Option<SegmentWindow>,
+    progress: bool,
+    accel: (Option<HwAccel>, Option<HwAccel>),
+) -> Vec<String> {
+    let format = comparison_pixel_format(video);
+    let filter = format!(
+        "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[dist];\
+         [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
+         [dist][ref]xpsnr"
+    );
+
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-nostdin".to_string(),
+        "-loglevel".to_string(),
+        "info".to_string(),
+        "-nostats".to_string(),
+    ];
+    if progress {
+        args.extend(PROGRESS_ARGS.iter().map(|flag| (*flag).to_string()));
+    }
+    for (path, method) in [(distorted, accel.0), (reference, accel.1)] {
+        if let Some(method) = method {
+            args.push("-hwaccel".to_string());
+            args.push(method.as_str().to_string());
+        }
+        if let Some(window) = window {
+            args.extend([
+                "-ss".to_string(),
+                format!("{:.3}", window.start_seconds),
+                "-t".to_string(),
+                format!("{:.3}", window.duration_seconds),
+            ]);
+        }
+        args.extend(["-i".to_string(), path.to_string_lossy().to_string()]);
+    }
+
+    args.extend([
+        "-lavfi".to_string(),
+        filter,
+        "-f".to_string(),
+        "null".to_string(),
+        "-".to_string(),
+    ]);
+    args
+}
+
+// AI-FUNC-SUMMARY: Parses FFmpeg xpsnr summary output and maps weighted dB onto a VMAF-equivalent score in hundredths; returns none when no xpsnr line was printed; side effects: none.
+pub fn parse_xpsnr_score(text: &str) -> Option<u32> {
+    let mut found = None;
+    for line in text.lines() {
+        let Some(pos) = line.find("XPSNR") else {
+            continue;
+        };
+        let rest = &line[pos..];
+        let Some(y) = extract_xpsnr_channel(rest, "y:") else {
+            continue;
+        };
+        let u = extract_xpsnr_channel(rest, "u:").unwrap_or(y);
+        let v = extract_xpsnr_channel(rest, "v:").unwrap_or(y);
+        if y.is_infinite() && u.is_infinite() && v.is_infinite() {
+            found = Some(10000);
+            continue;
+        }
+        let clamp_inf = |val: f64| if val.is_infinite() { 60.0 } else { val };
+        let weighted_db = (4.0 * clamp_inf(y) + clamp_inf(u) + clamp_inf(v)) / 6.0;
+        found = Some(xpsnr_db_to_vmaf_hundredths(weighted_db));
+    }
+    found
+}
+
+// AI-FUNC-SUMMARY: Turns finished xpsnr output into a VMAF-equivalent score; returns the score or a user-facing error; side effects: none.
+pub fn xpsnr_score_from_output(
+    succeeded: bool,
+    text: &str,
+    subsample: u32,
+) -> Result<VmafScore, String> {
+    if !succeeded {
+        return Err(format!(
+            "quality measurement failed: {}",
+            first_error_line(text)
+        ));
+    }
+
+    parse_xpsnr_score(text)
+        .map(|hundredths| VmafScore {
+            hundredths,
+            subsample: subsample.max(1),
+        })
+        .ok_or_else(|| "quality measurement produced no XPSNR score".to_string())
+}
+
+// AI-FUNC-SUMMARY: Extracts one channel dB value from an FFmpeg XPSNR summary line; returns infinity for lossless `inf` or the parsed float; side effects: none.
+fn extract_xpsnr_channel(line: &str, key: &str) -> Option<f64> {
+    let idx = line.find(key)? + key.len();
+    let token = line[idx..].split_whitespace().next()?;
+    if token.eq_ignore_ascii_case("inf") {
+        return Some(f64::INFINITY);
+    }
+    token.parse::<f64>().ok().filter(|val| val.is_finite())
+}
+
+// AI-FUNC-SUMMARY: Maps weighted XPSNR decibels monotonically onto VMAF-equivalent hundredths for uniform review thresholds; returns score in 5000..=10000; side effects: none.
+fn xpsnr_db_to_vmaf_hundredths(db: f64) -> u32 {
+    const KNOTS: [(f64, f64); 6] = [
+        (28.0, 5000.0),
+        (35.0, 8000.0),
+        (40.0, 9000.0),
+        (43.0, 9500.0),
+        (46.0, 9750.0),
+        (50.0, 9950.0),
+    ];
+    if db <= KNOTS[0].0 {
+        return 5000;
+    }
+    if db >= KNOTS[KNOTS.len() - 1].0 {
+        return 9950;
+    }
+    for pair in KNOTS.windows(2) {
+        let (x0, y0) = pair[0];
+        let (x1, y1) = pair[1];
+        if db <= x1 {
+            let t = (db - x0) / (x1 - x0);
+            return (y0 + (y1 - y0) * t).round() as u32;
+        }
+    }
+    9950
 }
 
 // AI-FUNC-SUMMARY: Chooses the VMAF model that matches the source resolution; returns the built-in model name; side effects: none.
@@ -607,5 +873,75 @@ mod tests {
         };
         assert!((score.points() - 95.12).abs() < 0.001);
         let _ = PathBuf::new();
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies segmented quality planning skips short clips and spreads windows through long files; returns nothing; side effects: none.
+    fn plans_segmented_windows() {
+        assert_eq!(segmented_plan(30.0), None);
+        let medium = segmented_plan(300.0).unwrap();
+        assert_eq!(medium.len(), 3);
+        assert!(medium[0].start_seconds >= 30.0);
+        assert!(
+            medium
+                .windows(2)
+                .all(|w| w[0].start_seconds < w[1].start_seconds)
+        );
+
+        let long = segmented_plan(3600.0).unwrap();
+        assert_eq!(long.len(), MAX_SEGMENT_WINDOWS);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies segmented VMAF and XPSNR commands put seek flags before each input; returns nothing; side effects: none.
+    fn builds_segmented_and_xpsnr_commands() {
+        let win = SegmentWindow {
+            start_seconds: 120.0,
+            duration_seconds: 6.0,
+        };
+        let vmaf_args = build_segmented_vmaf_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/in.mp4"),
+            &video(1920, 1080, "yuv420p"),
+            VmafOptions {
+                subsample: 2,
+                threads: 4,
+            },
+            win,
+            false,
+            (None, None),
+        );
+        assert_eq!(vmaf_args.iter().filter(|a| *a == "-ss").count(), 2);
+        assert_eq!(vmaf_args.iter().filter(|a| *a == "-t").count(), 2);
+        assert!(vmaf_args.join(" ").contains("n_subsample=2"));
+
+        let xpsnr_args = build_xpsnr_args(
+            Path::new("/tmp/out.mp4"),
+            Path::new("/videos/in.mp4"),
+            &video(1920, 1080, "yuv420p10le"),
+            Some(win),
+            true,
+            (None, None),
+        );
+        let joined = xpsnr_args.join(" ");
+        assert!(joined.contains("format=yuv420p10le"));
+        assert!(joined.contains("[dist][ref]xpsnr"));
+        assert!(joined.contains("-progress pipe:1"));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies XPSNR parsing maps dB values monotonically and handles inf; returns nothing; side effects: none.
+    fn parses_xpsnr_scores() {
+        assert_eq!(parse_xpsnr_score("no xpsnr"), None);
+        assert_eq!(
+            parse_xpsnr_score("[Parsed_xpsnr_4] XPSNR  y: inf  u: inf  v: inf  (minimum: inf)"),
+            Some(10000)
+        );
+        let low = parse_xpsnr_score("XPSNR  y: 35.0000  u: 35.0000  v: 35.0000").unwrap();
+        let target = parse_xpsnr_score("XPSNR  y: 43.0000  u: 43.0000  v: 43.0000").unwrap();
+        let high = parse_xpsnr_score("XPSNR  y: 48.0000  u: 48.0000  v: 48.0000").unwrap();
+        assert_eq!(low, 8000);
+        assert_eq!(target, 9500);
+        assert!(high > target);
     }
 }

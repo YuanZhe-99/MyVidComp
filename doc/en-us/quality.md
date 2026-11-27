@@ -5,20 +5,26 @@ whether it got there.
 
 ## What is measured
 
-Quality is measured with VMAF, a model Netflix trained on how people actually
-rate video. It produces one number from 0 to 100 comparing a converted file
-against its source. Roughly six points is one just-noticeable difference, and a
-score around 93 to 95 is where most viewers stop being able to tell the two
-apart. That is why the default target is 95.
+Quality is measured with VMAF by default — a model Netflix trained on how people
+actually rate video. It produces one number from 0 to 100 comparing a converted
+file against its source. Roughly six points is one just-noticeable difference,
+and a score around 93 to 95 is where most viewers stop being able to tell the
+two apart. That is why the default target is 95.
+
+MyVidComp also supports FFmpeg's built-in `xpsnr` metric (`--quality-metric
+xpsnr` or `auto`), which measures perceptually weighted PSNR across luma and
+chroma much faster on CPU and maps the decibel score onto the same 0–100 scale
+for target and review comparison. Under `auto`, a fast `xpsnr` pass screens
+obvious passes or misses and confirms borderline results with `libvmaf`.
 
 Scores are kept in hundredths everywhere inside the program, so they cross the
 embedding boundary as whole numbers.
 
 ## Measuring
 
-Measurement runs FFmpeg's `libvmaf` filter with the converted file as the first
-input and the source as the second. That order matters: reversed, the filter
-still produces a number, just a different one.
+Measurement runs FFmpeg's `libvmaf` (or `xpsnr`) filter with the converted file
+as the first input and the source as the second. That order matters: reversed,
+the filter still produces a number, just a different one.
 
 Three things are done to every comparison:
 
@@ -32,6 +38,12 @@ Three things are done to every comparison:
   The two files are decoded separately, because they are in different codecs and
   hardware that reads one may refuse the other, and the decoded frames are
   brought back into ordinary memory for the filter.
+
+For whole-file checks (`sampled` / `full`), the check runs once across the stream.
+For the default `segmented` check on files 60 seconds or longer, up to six
+6-second windows spaced evenly across the body of the video (2x subsampling)
+are decoded directly with pre-input `-ss` / `-t` seeking and scored cleanly in
+a fraction of the time.
 
 The model is chosen by resolution: the 4K model above 1440p, the standard model
 below it.
@@ -54,12 +66,13 @@ number behaves differently on different footage. There are two ways to pick one.
 
 Short samples are copied out of the source without re-encoding, spread through
 the middle of the file, away from titles and credits. One sample per twelve
-minutes, twenty seconds each, at most six.
+minutes, twelve seconds each, at most six.
 
-Each trial encodes every sample at one setting and measures the result on every
-frame, then interpolates towards the setting that lands just above the target.
-The search stops when the bracket closes to one step, when a setting repeats, or
-after six trials. The chosen setting is the largest passing value, which is the
+Each trial encodes every sample at one setting and measures the result with
+`n_subsample=2` for speed, then interpolates towards the setting that lands just
+above the target (seeded by an initial estimate when available). The search
+stops when the bracket closes to one step, when a setting repeats, or after
+six trials. The chosen setting is the largest passing value, which is the
 smallest file that still reaches the target.
 
 If nothing reaches the target, the best trial is used and the run says so.
@@ -79,6 +92,12 @@ from bitrate per pixel per frame when it does not, then converted onto the
 target encoder's scale. It costs nothing and is less precise. Files under 90
 seconds always use it.
 
+### Fixed quality
+
+Passes the user's explicit `--fixed-quality` (`fixed_quality`) CRF/QP value on
+to the encoder without search or estimation, or falls back to the encoder's
+built-in default when none is given.
+
 ## After the conversion
 
 Every finished conversion is compared against its source unless the quality
@@ -95,9 +114,12 @@ never skips the check.
 ## Cost
 
 Measurement is not free. Comparing every frame of a 1080p file takes about as
-long as encoding it; 4K is several times worse. The spot check compares one
-frame in five, which is several times faster and accurate enough to decide with.
-A tuning search adds a handful of short encodes on top of that.
+long as encoding it; 4K is several times worse. `segmented` (the default) seeks
+to up to six 6-second windows across files 60 s or longer with `n_subsample=2`,
+keeping CPU measurement bounded to seconds even on long 4K inputs. `sampled`
+compares one frame in five across the full stream, and `--quality-metric xpsnr`
+(or `auto`) replaces or screens slow `libvmaf` passes. A tuning search adds a
+handful of short 12-second sample encodes on top of that.
 
 ## Reading the video
 

@@ -101,6 +101,7 @@ class AppController extends ChangeNotifier {
   AppController({
     this._settingsStore = const SettingsStore(),
     this._reviewStore = const ReviewStore(),
+    this.previewService = const PreviewService(),
     Future<MediaTools> Function({
       String ffmpegOverride,
       String ffprobeOverride,
@@ -110,6 +111,7 @@ class AppController extends ChangeNotifier {
 
   final SettingsStore _settingsStore;
   final ReviewStore _reviewStore;
+  final PreviewService previewService;
   final Future<MediaTools> Function({
     String ffmpegOverride,
     String ffprobeOverride,
@@ -153,6 +155,7 @@ class AppController extends ChangeNotifier {
   late final List<LogEntry> _logView = UnmodifiableListView(_log);
   List<PendingReview> _reviews = const [];
   bool _loadingReviews = false;
+  List<String> _availableEncoders = const [];
 
   AppSettings get settings => _settings;
   MediaTools get tools => _tools;
@@ -188,6 +191,7 @@ class AppController extends ChangeNotifier {
   List<LogEntry> get log => _logView;
   List<PendingReview> get reviews => _reviews;
   bool get loadingReviews => _loadingReviews;
+  List<String> get availableEncoders => _availableEncoders;
 
   /// True while a run is under way, whether this interface started it or the
   /// engine is reporting one already in flight.
@@ -213,21 +217,45 @@ class AppController extends ChangeNotifier {
     await refreshReviews();
   }
 
-  // AI-FUNC-SUMMARY: Looks for the video tools again; returns when the search finishes; side effects: reads the filesystem.
+  // AI-FUNC-SUMMARY: Looks for the video tools again and refreshes available encoders; returns when the search finishes; side effects: reads the filesystem and may probe ffmpeg encoders.
   Future<void> refreshTools() async {
     _tools = await _detectTools(
       ffmpegOverride: _settings.ffmpeg,
       ffprobeOverride: _settings.ffprobe,
     );
     notifyListeners();
+    if (_tools.areReady) {
+      unawaited(refreshAvailableEncoders());
+    } else {
+      _availableEncoders = const [];
+      notifyListeners();
+    }
   }
 
-  // AI-FUNC-SUMMARY: Replaces the settings and saves them shortly afterwards; returns none; side effects: schedules a write and may re-check the tools.
+  // AI-FUNC-SUMMARY: Queries runtime-verified encoders for the active codec; returns when complete; side effects: updates availableEncoders.
+  Future<void> refreshAvailableEncoders() async {
+    if (!_tools.areReady) {
+      return;
+    }
+    try {
+      final list = await previewService.listEncoders(
+        _tools.ffmpeg.path,
+        _settings.codec,
+      );
+      _availableEncoders = List.unmodifiable(list);
+      notifyListeners();
+    } catch (_) {
+      // Missing/unusable native library in tests or older installs stays non-fatal.
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Replaces the settings and saves them shortly afterwards; returns none; side effects: schedules a write and may re-check tools or encoders.
   void updateSettings(AppSettings settings) {
     final toolsChanged =
         settings.ffmpeg != _settings.ffmpeg ||
         settings.ffprobe != _settings.ffprobe;
     final folderChanged = settings.targetFolder != _settings.targetFolder;
+    final codecChanged = settings.codec != _settings.codec;
     _settings = settings;
     notifyListeners();
 
@@ -236,6 +264,8 @@ class AppController extends ChangeNotifier {
 
     if (toolsChanged) {
       unawaited(refreshTools());
+    } else if (codecChanged) {
+      unawaited(refreshAvailableEncoders());
     }
     if (folderChanged) {
       unawaited(refreshReviews());
@@ -336,6 +366,15 @@ class AppController extends ChangeNotifier {
       qualityCheck: _settings.qualityCheck,
       qualityTarget: _settings.qualityTarget,
       reviewMargin: _settings.reviewMargin,
+      qualityThreads: _settings.qualityThreads,
+      encoderPreset: _settings.encoderPreset,
+      qualityMetric: _settings.qualityMetric,
+      fixedQuality: _settings.fixedQuality,
+      recursive: _settings.recursive,
+      outputDir: _settings.outputDir,
+      sizeGuard: _settings.sizeGuard,
+      audioPolicy: _settings.audioPolicy,
+      deinterlace: _settings.deinterlace,
     );
 
     try {

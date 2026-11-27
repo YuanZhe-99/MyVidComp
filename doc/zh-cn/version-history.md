@@ -1,5 +1,14 @@
 # 版本历史
 
+## 0.4.0 — 更快的画质检测、更灵活的策略与复核对比试看
+
+Tier A 画质检测提速（默认采用最多 6 个 6 秒窗口且 2 倍跳帧的 `segmented` 分段检测、12 秒 2 倍跳帧
+搜索试编码，以及 `xpsnr` / `auto` 指标模式）、扩展容器与处理选项（`mkv`、`keep`、`--preset`、`fixed`
+画质模式、`--recursive` / `--no-recursive`、`--output-dir`、`--size-guard`、`--audio-policy`、
+`--deinterlace`、运行时可选编码器）、精简重构后的转换／进度／设置界面，以及交互式双模式复核对比
+视图（由 `src/preview.rs` 驱动的 `ReviewComparePage`）。FFI ABI 升级至版本 3（`FfiRunOptionsV3` /
+`myvidcomp_run_blocking_v3`）并完整兼容 V1/V2。CLI `0.4.0` 与 GUI `0.4.0+16`（设置 schema v5）。
+
 ## 0.3.0 — 统一 MyApps-UI 展示
 
 采用 MyApps-UI v0.1.7 基础主题、随风格切换的浮动导航、共享设置分组和完整外观设置行。

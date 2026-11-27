@@ -27,6 +27,7 @@ setting without test encodes. Described for readers in [../encoders.md](../encod
 | `bundled_binary_names` | function | Provides bundled binary names behavior, returning the declared result. |
 | `platform_binary_name` | function | Provides platform binary name behavior, returning the declared result. |
 | `discover_files` | function | Discovers or probes discover files data, returning collected metadata. |
+| `discover_files_with_recursion` | function | Discovers candidate video files under a folder with optional subdirectory recursion, returning sorted paths. |
 | `is_candidate_video_path` | function | Checks is candidate video path predicate, returning a boolean. |
 | `is_candidate_video_extension` | function | Checks is candidate video extension predicate, returning a boolean. |
 | `visit_dir` | function | Discovers or probes visit dir data, returning collected metadata. |

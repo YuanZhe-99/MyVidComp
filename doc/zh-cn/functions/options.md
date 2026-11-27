@@ -34,3 +34,26 @@
 | `format_quality` | function | 把百分之一单位的画质值格式化以供显示，返回一个简短的十进制字符串。 |
 | `is_unset_choice` | function | 检查一个选项字符串是否表示“未设置”，空白、auto 或 default 时返回真。 |
 | `parse_quality_points` | function | 把 “2” 或 “1.5” 这样的十进制 VMAF 分值解析为百分之一单位，返回该值或一条面向用户的错误。 |
+| `as_str` | function | 把画质指标映射到它稳定的传输值，返回静态标签。 |
+| `label` | function | 把画质指标映射到便于人读的日志标签，返回静态标签。 |
+| `parse_quality_metric` | function | 解析画质指标的传输值，返回该指标或一条面向用户的错误。 |
+| `normalize_quality_metric_choice` | function | 归一化可选的画质指标值，空白、auto 或 default 时返回无，否则返回解析出的指标。 |
+| `as_str` | function | 把编码预设映射到它稳定的传输值，返回静态标签。 |
+| `label` | function | 把编码预设映射到便于人读的日志标签，返回静态标签。 |
+| `parse_encoder_preset` | function | 解析编码预设的传输值，返回该预设或一条面向用户的错误。 |
+| `normalize_encoder_preset_choice` | function | 归一化可选的编码预设值，空白、auto 或 default 时返回无，否则返回解析出的预设。 |
+| `as_str` | function | 把音频策略映射到它稳定的传输值，返回静态标签。 |
+| `parse_audio_policy` | function | 解析音频策略的传输值，返回该策略或一条面向用户的错误。 |
+| `normalize_audio_policy_choice` | function | 归一化可选的音频策略值，空白或 default 时返回无，否则返回解析出的策略。 |
+| `as_str` | function | 把反交错策略映射到它稳定的传输值，返回静态标签。 |
+| `parse_deinterlace_policy` | function | 解析反交错策略的传输值，返回该策略或一条面向用户的错误。 |
+| `normalize_deinterlace_policy_choice` | function | 归一化可选的反交错策略值，空白或 default 时返回无，否则返回解析出的策略。 |
+| `as_str` | function | 把体积保护策略映射到它稳定的传输值，返回静态标签。 |
+| `parse_size_guard` | function | 解析体积保护策略的传输值，返回该策略或一条面向用户的错误。 |
+| `normalize_size_guard_choice` | function | 归一化可选的体积保护策略值，空白或 default 时返回无，否则返回解析出的策略。 |
+| `as_str` | function | 把硬件加速后端映射到它稳定的 FFmpeg 方式名称，返回静态标签。 |
+| `as_str` | function | 把解码器偏好映射到它稳定的传输值，返回静态标签。 |
+| `label` | function | 把解码器偏好格式化为便于人读的状态日志标签，返回字符串标签。 |
+| `allows_hardware` | function | 报告解码器偏好是否允许硬件解码，仅 CPU 模式下返回假。 |
+| `parse_decoder_preference` | function | 解析解码器偏好的传输值（`auto`、`gpu`、`cpu` 或指定方式名），返回该偏好或一条面向用户的错误。 |
+| `normalize_decoder_preference_choice` | function | 归一化可选的解码器偏好值，空白或 default 时返回无，否则返回解析出的偏好。 |

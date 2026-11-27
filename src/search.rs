@@ -36,7 +36,7 @@ pub(crate) fn search_steps(samples: usize) -> usize {
     samples * (1 + 2 * MAX_ITERATIONS)
 }
 /// Seconds of video in each sample.
-const SAMPLE_SECONDS: f64 = 20.0;
+const SAMPLE_SECONDS: f64 = 12.0;
 /// Aim for roughly one sample per this many seconds of source.
 const SECONDS_PER_SAMPLE: f64 = 720.0;
 /// Never take more than this many samples, however long the file is.
@@ -79,14 +79,18 @@ pub(crate) fn sample_offsets(duration_seconds: f64, plan: SamplePlan) -> Vec<f64
         .collect()
 }
 
-// AI-FUNC-SUMMARY: Picks the next quality value to try from the results so far; returns the value, or none when the search has converged; side effects: none.
-pub(crate) fn next_quality(
+// AI-FUNC-SUMMARY: Picks the next quality value to try from the results so far, optionally starting at an initial estimate; returns the value, or none when the search has converged; side effects: none.
+pub(crate) fn next_quality_with_guess(
     tried: &[(f64, u32)],
     target: u32,
     range: codec::QualityRange,
+    initial_guess: Option<f64>,
 ) -> Option<f64> {
     if tried.is_empty() {
-        return Some(midpoint(range));
+        return Some(snap(
+            initial_guess.unwrap_or_else(|| midpoint(range)),
+            range,
+        ));
     }
 
     // The best point that still clears the target, and the worst that does not.
@@ -144,6 +148,16 @@ pub(crate) fn next_quality(
         return None;
     }
     Some(snapped)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+// AI-FUNC-SUMMARY: Picks the next quality value to try from the results so far; returns the value, or none when the search has converged; side effects: none.
+pub(crate) fn next_quality(
+    tried: &[(f64, u32)],
+    target: u32,
+    range: codec::QualityRange,
+) -> Option<f64> {
+    next_quality_with_guess(tried, target, range, None)
 }
 
 // AI-FUNC-SUMMARY: Chooses the final setting from every trial; returns the largest value that reached the target, or the best-scoring value when none did; side effects: none.
@@ -371,13 +385,13 @@ pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result
             return Err(format!("trial encode failed: {detail}"));
         }
 
-        // Trials are measured on every frame: the samples are short, and a
-        // subsampled score on 20 seconds is too noisy to steer a search.
+        // Trials sample every second frame: short clips with subsample=2 match
+        // full-frame scores within ~0.1 VMAF while cutting search time in half.
         let options = VmafOptions {
-            subsample: 1,
+            subsample: 2,
             threads: 0,
         };
-        // Trials stay on the processor: a sample is twenty seconds, and creating
+        // Trials stay on the processor: a sample is twelve seconds, and creating
         // a decoding device costs more than software decoding that much video,
         // up to thirty-six times per file.
         let args = vmaf::build_vmaf_args(&encoded, sample, video, options, true, (None, None));
@@ -393,7 +407,7 @@ pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result
         let _ = fs::remove_file(&encoded);
 
         let score = measurement.and_then(|measurement| {
-            vmaf::score_from_output(measurement.status.success(), &measurement.stderr, 1)
+            vmaf::score_from_output(measurement.status.success(), &measurement.stderr, 2)
         });
         if let Ok(score) = score {
             total += u64::from(score.hundredths);

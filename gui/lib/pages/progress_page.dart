@@ -6,15 +6,23 @@ import '../formatting.dart';
 import '../widgets.dart';
 
 /// The screen that shows what is happening right now and what already happened.
-class ProgressPage extends StatelessWidget {
+class ProgressPage extends StatefulWidget {
   const ProgressPage({super.key, required this.controller});
 
   final AppController controller;
 
   @override
-  // AI-FUNC-SUMMARY: Builds the progress screen; returns the widget; side effects: none.
+  State<ProgressPage> createState() => _ProgressPageState();
+}
+
+class _ProgressPageState extends State<ProgressPage> {
+  FileOutcome? _filter;
+
+  @override
+  // AI-FUNC-SUMMARY: Builds the progress screen with inline stop control and outcome filters; returns the widget; side effects: none.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
+    final controller = widget.controller;
 
     if (!controller.isActive && controller.records.isEmpty) {
       return EmptyState(
@@ -28,7 +36,12 @@ class ProgressPage extends StatelessWidget {
       children: [
         _StatusCard(controller: controller),
         _Totals(controller: controller),
-        if (controller.records.isNotEmpty) _FileList(controller: controller),
+        if (controller.records.isNotEmpty)
+          _FileList(
+            controller: controller,
+            filter: _filter,
+            onFilterChanged: (next) => setState(() => _filter = next),
+          ),
         if (controller.log.isNotEmpty) _DetailsLog(controller: controller),
       ],
     );
@@ -78,6 +91,13 @@ class _StatusCard extends StatelessWidget {
             ? Icons.error_outline
             : Icons.check_circle_outline,
       ),
+      trailing: controller.isRunning
+          ? OutlinedButton.icon(
+              onPressed: controller.isStopping ? null : controller.stop,
+              icon: const Icon(Icons.stop_rounded, size: 18),
+              label: Text(controller.isStopping ? text.stopping : text.stop),
+            )
+          : null,
       children: [
         if (controller.currentFile.isNotEmpty) ...[
           Text(
@@ -164,21 +184,75 @@ class _Totals extends StatelessWidget {
 }
 
 class _FileList extends StatelessWidget {
-  const _FileList({required this.controller});
+  const _FileList({
+    required this.controller,
+    required this.filter,
+    required this.onFilterChanged,
+  });
 
   final AppController controller;
+  final FileOutcome? filter;
+  final ValueChanged<FileOutcome?> onFilterChanged;
 
   @override
-  // AI-FUNC-SUMMARY: Builds the list of files this run has finished with; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Builds the filterable list of files this run has finished with; returns the widget; side effects: none.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
+    final filtered = controller.records.reversed
+        .where((record) => filter == null || record.outcome == filter)
+        .take(200);
 
     return SectionCard(
       title: text.navActivity,
       leading: const Icon(Icons.list_alt_outlined),
       children: [
-        for (final record in controller.records.reversed.take(200))
-          _FileRow(record: record, text: text),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilterChip(
+                label: Text(text.filterAll),
+                selected: filter == null,
+                onSelected: (_) => onFilterChanged(null),
+              ),
+              FilterChip(
+                label: Text(text.converted),
+                selected: filter == FileOutcome.converted,
+                onSelected: (_) => onFilterChanged(
+                  filter == FileOutcome.converted
+                      ? null
+                      : FileOutcome.converted,
+                ),
+              ),
+              FilterChip(
+                label: Text(text.needsReview),
+                selected: filter == FileOutcome.needsReview,
+                onSelected: (_) => onFilterChanged(
+                  filter == FileOutcome.needsReview
+                      ? null
+                      : FileOutcome.needsReview,
+                ),
+              ),
+              FilterChip(
+                label: Text(text.skipped),
+                selected: filter == FileOutcome.skipped,
+                onSelected: (_) => onFilterChanged(
+                  filter == FileOutcome.skipped ? null : FileOutcome.skipped,
+                ),
+              ),
+              FilterChip(
+                label: Text(text.failed),
+                selected: filter == FileOutcome.failed,
+                onSelected: (_) => onFilterChanged(
+                  filter == FileOutcome.failed ? null : FileOutcome.failed,
+                ),
+              ),
+            ],
+          ),
+        ),
+        for (final record in filtered) _FileRow(record: record, text: text),
       ],
     );
   }

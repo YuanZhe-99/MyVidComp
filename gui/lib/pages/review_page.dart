@@ -5,6 +5,7 @@ import '../app_localizations.dart';
 import '../formatting.dart';
 import '../core_ffi.dart';
 import '../widgets.dart';
+import 'review_compare_page.dart';
 
 /// The screen where the user decides which copy of a converted video to keep.
 class ReviewPage extends StatelessWidget {
@@ -225,7 +226,7 @@ class _Decisions extends StatelessWidget {
   final PendingReview review;
 
   @override
-  // AI-FUNC-SUMMARY: Builds the three decision buttons for one conversion; returns the widget; side effects: none.
+  // AI-FUNC-SUMMARY: Builds the comparison preview and decision buttons for one conversion; returns the widget; side effects: none.
   Widget build(BuildContext context) {
     final text = AppText.of(context);
 
@@ -233,6 +234,16 @@ class _Decisions extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
+        FilledButton.tonalIcon(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (context) =>
+                  ReviewComparePage(controller: controller, review: review),
+            ),
+          ),
+          icon: const Icon(Icons.compare),
+          label: Text(text.comparePreview),
+        ),
         FilledButton(
           onPressed: () => _resolve(context, 'keep-new'),
           child: Text(text.keepNew),

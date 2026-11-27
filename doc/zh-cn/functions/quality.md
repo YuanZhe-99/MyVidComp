@@ -29,3 +29,16 @@
 | `trial_quality_args` | function | 构造一次试验编码在快速预设下的画质参数，返回参数列表。 |
 | `quality_from_value` | function | 把搜索得到的值换算回编码实际使用的画质设置，返回该设置。 |
 | `hardware_bitrate_ladder` | function | 列出硬件搜索应当尝试的码率，从小到大，以每秒千比特为单位返回。 |
+| `detect_xpsnr_support` | function | 检查当前 FFmpeg 构建是否包含内置的 `xpsnr` 滤镜，返回布尔值。 |
+| `detect_vmaf_cuda_support` | function | 检查当前 FFmpeg 构建是否包含 `libvmaf_cuda`，返回布尔值。 |
+| `can_score_on_gpu` | function | 检查视频是否采用适合 CUDA VMAF 评分的 8 位 4:2:0 像素格式，返回布尔值。 |
+| `build_vmaf_cuda_args` | function | 构造完全留在显存中的 `libvmaf_cuda` 比较所需 FFmpeg 参数，返回参数列表。 |
+| `segmented_plan` | function | 为 60 秒及以上的视频计算最多 6 个 6 秒比对窗口，返回分段窗口或短片返回无。 |
+| `build_segmented_vmaf_args` | function | 构造拼接输入前跳转窗口以加速 `libvmaf` 评分的 FFmpeg 参数，返回参数列表。 |
+| `build_xpsnr_args` | function | 构造使用快速 CPU `xpsnr` 滤镜比对两路视频流的 FFmpeg 参数，返回参数列表。 |
+| `parse_xpsnr_score` | function | 从 FFmpeg 输出解析加权 XPSNR 分贝值并换算到 0–10000 标度，返回百分之一分或无。 |
+| `xpsnr_score_from_output` | function | 读取已完成的 XPSNR 运行输出，返回 `VmafScore` 包装或失败消息。 |
+| `extract_xpsnr_channel` | function | 从输出汇总行中解析单个指定 XPSNR 通道（`y`、`u` 或 `v`），返回分贝值或无。 |
+| `xpsnr_db_to_vmaf_hundredths` | function | 把加权 XPSNR 分贝值映射到 VMAF 百分之一标度，返回受限整数分数。 |
+| `score_from_output` | function | 把 `libvmaf` 输出文本解析为 `VmafScore`，返回分数或错误消息。 |
+| `next_quality_with_guess` | function | 从估算设置热启动二分画质搜索并向目标步进，返回下一设定值，已收敛时返回无。 |

@@ -5,14 +5,24 @@ import 'dart:io';
 /// The strings are the values the conversion engine understands.
 const List<String> codecChoices = ['av1', 'hevc', 'vvc'];
 const List<String> preservationChoices = ['flexible', 'strict'];
-const List<String> qualityModeChoices = ['search', 'estimate'];
-const List<String> qualityCheckChoices = ['sampled', 'full', 'off'];
+const List<String> qualityModeChoices = ['search', 'estimate', 'fixed'];
+const List<String> qualityCheckChoices = [
+  'segmented',
+  'sampled',
+  'full',
+  'off',
+];
+const List<String> qualityMetricChoices = ['vmaf', 'xpsnr', 'auto'];
 const List<String> encoderPreferenceChoices = ['auto', 'gpu', 'cpu'];
+const List<String> encoderPresetChoices = ['fast', 'balanced', 'slow'];
 
 /// How the source is read. A method name may also be stored, so the interface
 /// offers these three and keeps anything else the config file already had.
 const List<String> decoderPreferenceChoices = ['auto', 'gpu', 'cpu'];
-const List<String> containerChoices = ['mp4', 'mkv-fallback'];
+const List<String> containerChoices = ['mp4', 'mkv-fallback', 'mkv', 'keep'];
+const List<String> sizeGuardChoices = ['off', 'review', 'skip'];
+const List<String> audioPolicyChoices = ['copy', 'transcode-incompatible'];
+const List<String> deinterlaceChoices = ['skip', 'bwdif'];
 
 /// Quality presets, as VMAF scores in hundredths.
 const List<int> qualityPresets = [9700, 9500, 9300, 9000];
@@ -40,10 +50,19 @@ class AppSettings {
     required this.language,
     required this.themeMode,
     required this.uiStyle,
+    this.encoderPreset = 'balanced',
+    this.qualityMetric = 'vmaf',
+    this.fixedQuality = 2800,
+    this.qualityThreads = 0,
+    this.recursive = true,
+    this.outputDir = '',
+    this.sizeGuard = 'off',
+    this.audioPolicy = 'copy',
+    this.deinterlace = 'skip',
   });
 
   /// Bumped whenever a stored file needs interpreting differently.
-  static const int schemaVersion = 4;
+  static const int schemaVersion = 5;
 
   final String targetFolder;
 
@@ -79,6 +98,18 @@ class AppSettings {
   /// One of `material3` or `expressive`.
   final String uiStyle;
 
+  final String encoderPreset;
+  final String qualityMetric;
+
+  /// Fixed CRF/QP in hundredths when [qualityMode] is `fixed`.
+  final int fixedQuality;
+  final int qualityThreads;
+  final bool recursive;
+  final String outputDir;
+  final String sizeGuard;
+  final String audioPolicy;
+  final String deinterlace;
+
   static const AppSettings defaults = AppSettings(
     targetFolder: '',
     limit: 0,
@@ -92,7 +123,7 @@ class AppSettings {
     codec: 'av1',
     preservation: 'flexible',
     qualityMode: 'search',
-    qualityCheck: 'sampled',
+    qualityCheck: 'segmented',
     qualityTarget: 9500,
     reviewMargin: 200,
     ffmpeg: '',
@@ -100,6 +131,15 @@ class AppSettings {
     language: 'system',
     themeMode: 'system',
     uiStyle: 'expressive',
+    encoderPreset: 'balanced',
+    qualityMetric: 'vmaf',
+    fixedQuality: 2800,
+    qualityThreads: 0,
+    recursive: true,
+    outputDir: '',
+    sizeGuard: 'off',
+    audioPolicy: 'copy',
+    deinterlace: 'skip',
   );
 
   // AI-FUNC-SUMMARY: Produces a copy with selected fields replaced; returns the new settings; side effects: none.
@@ -124,6 +164,15 @@ class AppSettings {
     String? language,
     String? themeMode,
     String? uiStyle,
+    String? encoderPreset,
+    String? qualityMetric,
+    int? fixedQuality,
+    int? qualityThreads,
+    bool? recursive,
+    String? outputDir,
+    String? sizeGuard,
+    String? audioPolicy,
+    String? deinterlace,
   }) => AppSettings(
     targetFolder: targetFolder ?? this.targetFolder,
     limit: limit ?? this.limit,
@@ -145,6 +194,15 @@ class AppSettings {
     language: language ?? this.language,
     themeMode: themeMode ?? this.themeMode,
     uiStyle: uiStyle ?? this.uiStyle,
+    encoderPreset: encoderPreset ?? this.encoderPreset,
+    qualityMetric: qualityMetric ?? this.qualityMetric,
+    fixedQuality: fixedQuality ?? this.fixedQuality,
+    qualityThreads: qualityThreads ?? this.qualityThreads,
+    recursive: recursive ?? this.recursive,
+    outputDir: outputDir ?? this.outputDir,
+    sizeGuard: sizeGuard ?? this.sizeGuard,
+    audioPolicy: audioPolicy ?? this.audioPolicy,
+    deinterlace: deinterlace ?? this.deinterlace,
   );
 
   /// The engine reads -1 as "no limit"; the interface shows an empty box.
@@ -240,6 +298,37 @@ class AppSettings {
         'material3',
         'expressive',
       ], defaults.uiStyle),
+      encoderPreset: pick(
+        'encoderPreset',
+        encoderPresetChoices,
+        defaults.encoderPreset,
+      ),
+      qualityMetric: pick(
+        'qualityMetric',
+        qualityMetricChoices,
+        defaults.qualityMetric,
+      ),
+      fixedQuality: number(
+        'fixedQuality',
+        defaults.fixedQuality,
+      ).clamp(1000, 25500),
+      qualityThreads: number(
+        'qualityThreads',
+        defaults.qualityThreads,
+      ).clamp(0, 256),
+      recursive: flag('recursive', defaults.recursive),
+      outputDir: text('outputDir', defaults.outputDir),
+      sizeGuard: pick('sizeGuard', sizeGuardChoices, defaults.sizeGuard),
+      audioPolicy: pick(
+        'audioPolicy',
+        audioPolicyChoices,
+        defaults.audioPolicy,
+      ),
+      deinterlace: pick(
+        'deinterlace',
+        deinterlaceChoices,
+        defaults.deinterlace,
+      ),
     );
   }
 
@@ -277,6 +366,15 @@ class AppSettings {
     'language': language,
     'themeMode': themeMode,
     'uiStyle': uiStyle,
+    'encoderPreset': encoderPreset,
+    'qualityMetric': qualityMetric,
+    'fixedQuality': fixedQuality,
+    'qualityThreads': qualityThreads,
+    'recursive': recursive,
+    'outputDir': outputDir,
+    'sizeGuard': sizeGuard,
+    'audioPolicy': audioPolicy,
+    'deinterlace': deinterlace,
   };
 }
 

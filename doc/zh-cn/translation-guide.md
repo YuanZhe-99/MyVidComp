@@ -26,7 +26,7 @@
 - CLI 命令及其参数/输出。
 - 配置键（如 `conversion_mode`、`output_format`、`tmp_dir`）。
 - URL。
-- 产品、框架和协议名：MyVidComp、FFmpeg、FFprobe、AV1、MP4、MKV、Matroska、QuickTime、ISO BMFF、Flutter、Dart、Windows、ARM64、x64、MSVC、CMake、PowerShell。
+- 产品、框架和协议名：MyVidComp、FFmpeg、FFprobe、AV1、MP4、MKV、Matroska、QuickTime、ISO BMFF、Flutter、Dart、Windows、ARM64、x64、MSVC、CMake、PowerShell、VMAF、XPSNR。
 - 函数索引使用的 `Tier A` / `Tier B` 标签。
 - 围栏代码块内的任何内容，包括作为示例代码一部分的注释，除非注释是解释示例的散文且位于可执行行之外——此时翻译解释性注释文本，但绝不翻译代码 token 本身。
 
@@ -92,6 +92,13 @@
 | Tier A / Tier B | Tier A / Tier B | 文档覆盖分级标签，不译 |
 | l10n / localization | 本地化（l10n） | |
 | interface style | 界面风格 | Material 3 / Expressive 二选一；Material 3 与 Expressive 不译 |
+| XPSNR | XPSNR | FFmpeg 内置加权峰值信噪比指标，不译 |
+| segmented check | 分段检测 | 默认质量检测方式（`segmented`） |
+| encoder preset | 编码预设 | `fast` / `balanced` / `slow` |
+| size guard | 体积保护 | `off` / `review` / `skip` |
+| audio policy | 音频策略 | `copy` / `transcode-incompatible` |
+| deinterlace | 反交错 | `skip` / `bwdif` |
+| comparison preview | 对比试看 | 审查界面双模式对比预览 |
 
 ## 6. 提交中文页前的检查清单
 

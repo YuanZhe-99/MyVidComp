@@ -1,14 +1,16 @@
 # Output Format and Container Selection
 
 The `OutputFormat` policy is the typed container-policy boundary. MyVidComp outputs AV1 MP4 by default
-and never leaves the MP4 path unless the user opts into conservative MKV fallback.
+and never leaves the MP4 path unless the user selects `mkv`, `keep`, or conservative `mkv-fallback`.
 
-## The two formats
+## The four formats
 
 | Format | Wire value | Behavior |
 |---|---|---|
-| Strict MP4 (default) | `mp4` | Skips files whose mapped non-primary streams are outside the conservative MP4 copy whitelist, with a specific reason. |
+| Strict MP4 (default) | `mp4` | Skips files whose mapped non-primary streams are outside the conservative MP4 copy whitelist (unless audio transcoding is enabled), with a specific reason. |
 | MP4 with MKV fallback | `mkv-fallback` | For such files, switches the output container to MKV only when every mapped non-primary stream type is conservatively Matroska-copy-compatible. |
+| Always MKV | `mkv` | Writes Matroska (`.mkv`) for every converted file whose non-primary streams fit Matroska. |
+| Keep source container | `keep` | Uses `.mkv` when the source container was `.mkv` and uses `.mp4` (with strict MP4 compatibility checks) otherwise. |
 
 Selection is made **after** confirmed QuickTime chapter carriers have been excluded from the
 mapped stream set, so a chapter carrier never triggers MKV fallback — such files stay MP4.
@@ -53,11 +55,11 @@ MP4 and MKV are unsafe, the skip reason reports the MP4 reason followed by the M
 
 ## Selection surface
 
-- CLI: `--output-format mp4|mkv-fallback`
+- CLI: `--output-format mp4|mkv|mkv-fallback|keep` (optionally paired with `--audio-policy copy|transcode-incompatible` and `--output-dir PATH`)
 - Config: `output_format` (commented in package templates for older builds)
 - Embedded API: `RunOptions.output_format`
 - GUI: the localized Output format selector, persisted in GUI settings (schema v3+)
-- The embedding ABI: the `output_format` field of `FfiRunOptionsV1` (blank maps to `mp4`)
+- The embedding ABI: the `output_format` field of `FfiRunOptionsV1` (embedded inside V2 and V3; blank maps to `mp4`)
 
 The selected format is reported through the `output_format_selected` event and the terminal
 "Output format" line.

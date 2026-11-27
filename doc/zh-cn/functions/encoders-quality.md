@@ -27,6 +27,7 @@
 | `bundled_binary_names` | function | 提供随包可执行文件名称的行为，返回声明的结果。 |
 | `platform_binary_name` | function | 提供各平台可执行文件名称的行为，返回声明的结果。 |
 | `discover_files` | function | 发现或探测待处理文件，返回收集到的元数据。 |
+| `discover_files_with_recursion` | function | 在文件夹下按可选的子目录递归开关发现候选视频文件，返回已排序路径。 |
 | `is_candidate_video_path` | function | 检查是否为候选视频路径，返回一个布尔值。 |
 | `is_candidate_video_extension` | function | 检查是否为候选视频扩展名，返回一个布尔值。 |
 | `visit_dir` | function | 发现或探测一层目录，返回收集到的元数据。 |

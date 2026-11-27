@@ -16,6 +16,8 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `plan_deviations` | function | Lists the recoverable differences one encode plan introduces, returning a kind and sentence for each. |
 | `pixel_format_deviation` | function | Describes a pixel-format conversion as a recoverable difference, returning the `pixel_format` kind and a reader-facing sentence. |
 | `assess_quality` | function | Measures a finished conversion and decides whether it needs a human decision, returning the outcome. |
+| `measure_quality_with_progress` | function | Evaluates output quality using the configured metric (`vmaf`, `xpsnr`, or `auto`) and check depth while updating progress UI. |
+| `measure_with_metric` | function | Runs either VMAF (`segmented`/`sampled`/`full`) or XPSNR measurement against the source stream, returning a quality measurement result. |
 | `finish_conversion` | function | Commits a finished conversion, either replacing the original or keeping both for review, returning the conversion sizes or a terminal error. |
 | `commit_for_review` | function | Moves a finished conversion beside its untouched original and records why it needs a decision, returning the conversion sizes or a terminal error. |
 | `execute_transcode_attempt` | function | Executes one exact or explicitly adapted encoder attempt without committing it, returning success or classified failure. |
@@ -34,6 +36,7 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `file_size` | function | Provides file size behavior, returning the declared result. |
 | `build_ffmpeg_args` | function | Builds the ffmpeg arguments for a plain exact AV1 attempt, for tests, returning command arguments. |
 | `build_ffmpeg_args_for_plan` | function | Builds ffmpeg arguments for one encode attempt, returning command arguments. |
+| `build_ffmpeg_args_for_plan_with_preset` | function | Builds ffmpeg arguments for one encode attempt applying encoder preset, audio transcoding, and optional `bwdif` deinterlacing. |
 | `ensure_metadata_bsf` | function | Checks that this ffmpeg build carries the bitstream filter one codec needs for colour metadata, returning success or a user-facing error. |
 | `repair_av1_metadata` | function | Remuxes a temp output to rewrite AV1 colour metadata, returning success or a repair error; removes a stale repair file first. |
 | `build_av1_metadata_repair_args` | function | Builds or derives build av1 metadata repair args data, returning the computed value. |
@@ -57,6 +60,7 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `quality_value_arg` | function | Formats a constant-quality value the way its encoder expects it, returning the argument text. |
 | `mediacodec_args` | function | Builds the arguments every Android hardware encode needs, returning the argument list. |
 | `encoder_quality_args` | function | Builds the quality arguments for one encoder at one setting, returning the argument list. |
+| `encoder_quality_args_with_preset` | function | Builds the quality and abstract preset arguments mapped onto an encoder's native flags, returning the argument list. |
 | `run_ffmpeg_with_progress` | function | Runs ffmpeg while reporting progress, returning exit status plus captured stderr or process-management error. |
 | `read_to_string` | function | Reads a stream to its end as text, replacing bytes that are not valid UTF-8, returning the text or a read error. |
 | `abandon_child` | function | Stops an ffmpeg child the caller can no longer follow, returning nothing; kills and reaps it and joins its stderr reader. |

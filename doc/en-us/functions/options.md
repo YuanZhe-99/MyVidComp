@@ -34,3 +34,26 @@ setting. Described for readers in [../options.md](../options.md).
 | `format_quality` | function | Formats a hundredths quality value for display, returning a short decimal string. |
 | `is_unset_choice` | function | Checks whether an option string means "not set", returning true for blank, auto, or default. |
 | `parse_quality_points` | function | Parses a decimal VMAF point value such as "2" or "1.5" into hundredths, returning the value or a user-facing error. |
+| `as_str` | function | Maps a quality metric to its stable wire value, returning static label. |
+| `label` | function | Maps a quality metric to its human-readable log label, returning static label. |
+| `parse_quality_metric` | function | Parses a quality-metric wire value, returning the metric or a user-facing error. |
+| `normalize_quality_metric_choice` | function | Normalizes an optional quality-metric value, returning none for blank/auto/default or a parsed metric. |
+| `as_str` | function | Maps an encoder preset to its stable wire value, returning static label. |
+| `label` | function | Maps an encoder preset to its human-readable log label, returning static label. |
+| `parse_encoder_preset` | function | Parses an encoder-preset wire value, returning the preset or a user-facing error. |
+| `normalize_encoder_preset_choice` | function | Normalizes an optional encoder-preset value, returning none for blank/auto/default or a parsed preset. |
+| `as_str` | function | Maps an audio policy to its stable wire value, returning static label. |
+| `parse_audio_policy` | function | Parses an audio-policy wire value, returning the policy or a user-facing error. |
+| `normalize_audio_policy_choice` | function | Normalizes an optional audio-policy value, returning none for blank/default or a parsed policy. |
+| `as_str` | function | Maps a deinterlace policy to its stable wire value, returning static label. |
+| `parse_deinterlace_policy` | function | Parses a deinterlace-policy wire value, returning the policy or a user-facing error. |
+| `normalize_deinterlace_policy_choice` | function | Normalizes an optional deinterlace-policy value, returning none for blank/default or a parsed policy. |
+| `as_str` | function | Maps a size-guard policy to its stable wire value, returning static label. |
+| `parse_size_guard` | function | Parses a size-guard wire value, returning the policy or a user-facing error. |
+| `normalize_size_guard_choice` | function | Normalizes an optional size-guard value, returning none for blank/default or a parsed policy. |
+| `as_str` | function | Maps a hardware acceleration backend to its stable FFmpeg method name, returning static label. |
+| `as_str` | function | Maps a decoder preference to its stable wire value, returning static label. |
+| `label` | function | Formats a decoder preference for human-readable status logs, returning a string label. |
+| `allows_hardware` | function | Reports whether a decoder preference permits hardware decoding, returning false for CPU-only mode. |
+| `parse_decoder_preference` | function | Parses a decoder-preference wire value (`auto`, `gpu`, `cpu`, or named method), returning the preference or a user-facing error. |
+| `normalize_decoder_preference_choice` | function | Normalizes an optional decoder-preference value, returning none for blank/default or a parsed preference. |

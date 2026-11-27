@@ -29,3 +29,16 @@ Described for readers in [../quality.md](../quality.md).
 | `trial_quality_args` | function | Builds the quality arguments for one trial encode at a fast preset, returning the argument list. |
 | `quality_from_value` | function | Converts a searched value back into the quality setting the encode will use, returning the setting. |
 | `hardware_bitrate_ladder` | function | Lists the bitrates a hardware search should try, from smallest to largest, returning bitrates in kilobits per second. |
+| `detect_xpsnr_support` | function | Checks whether the FFmpeg build includes the built-in `xpsnr` filter, returning a boolean. |
+| `detect_vmaf_cuda_support` | function | Checks whether the FFmpeg build includes `libvmaf_cuda`, returning a boolean. |
+| `can_score_on_gpu` | function | Checks whether a video uses 8-bit 4:2:0 pixel format suitable for CUDA VMAF scoring, returning a boolean. |
+| `build_vmaf_cuda_args` | function | Builds FFmpeg arguments for CUDA-resident `libvmaf_cuda` comparison, returning the argument list. |
+| `segmented_plan` | function | Computes up to six 6-second comparison windows across files 60 s or longer, returning segment windows or none for short files. |
+| `build_segmented_vmaf_args` | function | Builds FFmpeg arguments concatenating pre-input seek windows for fast `libvmaf` scoring, returning the argument list. |
+| `build_xpsnr_args` | function | Builds FFmpeg arguments comparing two streams using the fast CPU `xpsnr` filter, returning the argument list. |
+| `parse_xpsnr_score` | function | Parses the weighted XPSNR decibel value from FFmpeg output and converts it onto the 0–10000 scale, returning hundredths or none. |
+| `xpsnr_score_from_output` | function | Reads a completed XPSNR run result, returning a `VmafScore` wrapper or a failure message. |
+| `extract_xpsnr_channel` | function | Parses a single named XPSNR channel (`y`, `u`, or `v`) from an output summary line, returning decibels or none. |
+| `xpsnr_db_to_vmaf_hundredths` | function | Maps a weighted XPSNR decibel score onto the VMAF hundredths scale, returning a bounded integer score. |
+| `score_from_output` | function | Parses `libvmaf` output lines into a `VmafScore`, returning the score or an error message. |
+| `next_quality_with_guess` | function | Warm-starts binary quality search from an estimated setting and steps towards the target, returning the next setting or none when converged. |

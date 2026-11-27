@@ -54,6 +54,10 @@ pub struct ReviewItem {
     pub score: Option<u32>,
     /// The score the run was aiming for, in hundredths.
     pub target: u32,
+    /// Duration of the source video in seconds, when known, for preview scrubbing.
+    pub duration_seconds: Option<f64>,
+    /// Timestamp in seconds where quality was lowest, when recorded.
+    pub worst_frame_seconds: Option<f64>,
     pub deviations: Vec<Deviation>,
 }
 
@@ -171,8 +175,14 @@ fn sidecar_json(item: &ReviewItem) -> String {
         .collect::<Vec<_>>()
         .join(",");
 
+    let opt_f64 = |val: Option<f64>| {
+        val.filter(|v| v.is_finite() && *v >= 0.0)
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "null".to_string())
+    };
+
     format!(
-        "{{\"version\":1,\"original_path\":{},\"review_path\":{},\"final_path\":{},\"original_bytes\":{},\"review_bytes\":{},\"encoder\":{},\"codec\":{},\"quality\":{},\"score\":{},\"target\":{},\"deviations\":[{}]}}",
+        "{{\"version\":1,\"original_path\":{},\"review_path\":{},\"final_path\":{},\"original_bytes\":{},\"review_bytes\":{},\"encoder\":{},\"codec\":{},\"quality\":{},\"score\":{},\"target\":{},\"duration_seconds\":{},\"worst_frame_seconds\":{},\"deviations\":[{}]}}",
         json_string(&item.original_path.to_string_lossy()),
         json_string(&item.review_path.to_string_lossy()),
         json_string(&item.final_path.to_string_lossy()),
@@ -185,6 +195,8 @@ fn sidecar_json(item: &ReviewItem) -> String {
             .map(|score| score.to_string())
             .unwrap_or_else(|| "null".to_string()),
         item.target,
+        opt_f64(item.duration_seconds),
+        opt_f64(item.worst_frame_seconds),
         deviations
     )
 }
@@ -258,6 +270,8 @@ pub fn read_sidecar(sidecar_path: &Path) -> Option<ReviewItem> {
         quality: field(&text, "quality").unwrap_or_default(),
         score: number(&text, "score").map(|value| value as u32),
         target: number(&text, "target").unwrap_or(0) as u32,
+        duration_seconds: float_number(&text, "duration_seconds"),
+        worst_frame_seconds: float_number(&text, "worst_frame_seconds"),
         deviations: deviations(&text),
     };
 
@@ -414,6 +428,21 @@ fn number(text: &str, key: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
+// AI-FUNC-SUMMARY: Reads one floating-point field out of a sidecar document; returns the finite value or none for a missing or null field; side effects: none.
+fn float_number(text: &str, key: &str) -> Option<f64> {
+    let needle = format!("\"{key}\":");
+    let start = text.find(&needle)? + needle.len();
+    let digits: String = text[start..]
+        .trim_start()
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
 // AI-FUNC-SUMMARY: Reads the deviation list out of a sidecar document; returns every recorded change; side effects: none.
 fn deviations(text: &str) -> Vec<Deviation> {
     let Some(start) = text.find("\"deviations\":[") else {
@@ -497,6 +526,8 @@ mod tests {
             quality: "crf=28".to_string(),
             score: Some(9412),
             target: 9500,
+            duration_seconds: Some(125.5),
+            worst_frame_seconds: Some(42.25),
             deviations: vec![Deviation::new(
                 "chroma_location",
                 "Chroma position could not be recorded in this codec.",
@@ -522,6 +553,8 @@ mod tests {
         assert_eq!(read.encoder, "libsvtav1");
         assert_eq!(read.score, Some(9412));
         assert_eq!(read.target, 9500);
+        assert_eq!(read.duration_seconds, Some(125.5));
+        assert_eq!(read.worst_frame_seconds, Some(42.25));
         assert_eq!(read.deviations.len(), 1);
         assert_eq!(read.deviations[0].kind, "chroma_location");
         assert!(read.deviations[0].detail.contains("Chroma position"));

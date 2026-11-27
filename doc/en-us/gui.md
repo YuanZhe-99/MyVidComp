@@ -13,10 +13,10 @@ Four, in the order a person meets them:
 
 | Screen | Holds |
 |---|---|
-| Convert | The folder, the output codec, the quality target, how careful to be, and Start. |
-| Progress | What is happening now, the totals, every finished file, and a collapsible technical log. |
-| Review | Conversions waiting for a decision, with their scores, sizes and changes. |
-| Settings | Everything else, with the rarely-needed parts behind an Advanced section. |
+| Convert | The folder, recursive toggle, the output codec, target/fixed quality, container, quick summary badges and Start. |
+| Progress | Active status, inline Stop action, totals, outcome filter chips on completed files, and a collapsible technical log. |
+| Review | Conversions waiting for a decision, with their scores, sizes, changes, and a Compare button opening the interactive comparator (`ReviewComparePage`). |
+| Settings | Grouped two-pane layout covering Encoder & Decoding, Quality & Speed, Output & Safety, and Paths & Appearance (with About / Licenses dialog). |
 
 The Review destination carries a badge whenever something is waiting.
 
@@ -86,9 +86,9 @@ is no navigation-bar preference: navigation follows the selected interface style
   `myvidcomp` elsewhere. Never in `config.yaml`, which belongs to the user.
 - Saving writes a temporary file beside `settings.json` and renames it into place, so a crash
   mid-write never leaves a half-written settings file.
-- A settings file written by the previous version is read once, so an existing install keeps its
-  folder, tool paths and language. The retired conversion-mode value is mapped onto the encoder
-  preference.
+- A settings file written by the previous version (schemas 1–4) is read and upgraded smoothly
+  to schema 5, so an existing install keeps its folder, tool paths, choices and language. The retired
+  conversion-mode value is mapped onto the encoder preference.
 - The style is stored as `uiStyle` (`material3` or `expressive`; `expressive` when missing or
   unrecognised), beside `themeMode`.
 - An unknown or out-of-range stored value falls back to the default rather than reaching the

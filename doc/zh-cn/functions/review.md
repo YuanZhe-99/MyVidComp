@@ -25,5 +25,6 @@
 | `review_summary_line` | function | 为终端输出描述一项复核条目，返回一行摘要。 |
 | `field` | function | 从伴随文件文档中读取一个字符串字段，返回反转义后的值或无。 |
 | `number` | function | 从伴随文件文档中读取一个数值字段，返回该值，字段缺失或为 null 时返回无。 |
+| `float_number` | function | 从伴随文件文档中读取一个可选浮点数字段，返回有限 `f64` 或无。 |
 | `deviations` | function | 从伴随文件文档中读取偏差列表，返回记录下来的全部变化，包括含有方括号或引号的文字。 |
 | `closing_bracket` | function | 找到结束一个 JSON 数组的 `]`，跳过引号字符串内的方括号，返回其偏移，数组未结束时返回无。 |

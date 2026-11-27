@@ -32,23 +32,39 @@ picker, which offers Highest (97), High (95), Balanced (93) and Smallest (90).
 |---|---|---|
 | `search` (default) | Measure and tune | Encodes short samples at several settings and picks the smallest that reaches the target. |
 | `estimate` | Quick estimate | Derives a setting from the source without test encodes. |
+| `fixed` | Fixed quality | Uses the caller's `--fixed-quality` / `fixed_quality` CRF or QP value directly. |
 
-Set with `--quality-mode` or the `quality_mode` config key. A search needs the
-media tools to support quality measurement; without that it falls back to an
-estimate and says so. Files shorter than 90 seconds are always estimated,
-because the trials would cost more than the conversion.
+Set with `--quality-mode` or the `quality_mode` config key. When set to `fixed`,
+supply `--fixed-quality` (in integer or half-step points); if omitted, the run
+falls back to the codec's default value. A search needs the media tools to
+support quality measurement; without that it falls back to an estimate and says
+so. Files shorter than 90 seconds are always estimated during `search`, because
+the trials would cost more than the conversion.
 
 ## Quality check
 
 | Wire value | Shown as | Meaning |
 |---|---|---|
-| `sampled` (default) | Spot check | Compares one frame in five. |
+| `segmented` (default) | Segmented check | Compares up to six 6-second windows across files 60 s or longer (2x frame subsample). |
+| `sampled` | Spot check | Compares one frame in five across the whole file. |
 | `full` | Every frame | Compares every frame. Slowest and most accurate. |
 | `off` | Skip | No comparison. |
 
 Set with `--quality-check` or the `quality_check` config key. A conversion that
 changed something recoverable is measured even under `off`, because its review
 decision depends on a score.
+
+## Quality metric
+
+| Wire value | Shown as | Meaning |
+|---|---|---|
+| `vmaf` (default) | VMAF | Measures perceptual quality with `libvmaf`. |
+| `xpsnr` | XPSNR | Measures weighted PSNR with FFmpeg's `xpsnr` filter (much faster on CPU) and maps dB onto the VMAF scale. |
+| `auto` | Auto (XPSNR then VMAF) | Screens with `xpsnr` first and confirms borderline scores near the target with `libvmaf`. |
+
+Set with `--quality-metric` or the `quality_metric` config key. Note that
+`xpsnr` and `auto` require a `xpsnr`-capable FFmpeg build and automatically fall
+back to VMAF if absent.
 
 ## Preservation
 
@@ -65,10 +81,24 @@ Flexible preservation relaxes exactly these, and nothing else:
 - a pixel-format conversion a codec or graphics card requires,
 - an MKV container when a stream will not fit in MP4.
 
-It never changes resolution, frame rate, HDR handling, or anything about the
-audio. Interlaced sources are still left alone, because deinterlacing is a
-change to the picture rather than to how it is described. See
+It never changes resolution or frame rate on its own. Interlaced sources are left
+alone under the default `--deinterlace skip`, whereas `--deinterlace bwdif`
+explicitly deinterlaces them with `bwdif`. Likewise, `--audio-policy copy`
+keeps all audio verbatim, while `--audio-policy transcode-incompatible`
+re-encodes MP4-incompatible audio tracks to AAC when outputting to MP4. See
 [review.md](review.md).
+
+## Encoding speed
+
+| Wire value | Shown as | Meaning |
+|---|---|---|
+| `fast` | Fast | Faster encode preset at slightly larger file size. |
+| `balanced` (default) | Balanced | Default encoder speed/efficiency trade-off. |
+| `slow` | Slow | Slower encode preset for better compression. |
+
+Set with `--preset` or the `encoder_preset` config key. Each encoder maps this
+abstract preset onto its own native preset flag (for example SVT-AV1 `-preset`,
+`libx265`/`libx264` presets, or NVENC `-preset`).
 
 ## Encoders
 
@@ -106,8 +136,10 @@ fails.
 
 | Wire value | Shown as | Meaning |
 |---|---|---|
-| `mp4` (default) | MP4 only | Files whose streams do not fit MP4 are left alone. |
+| `mp4` (default) | MP4 only | Files whose streams do not fit MP4 are left alone (unless `--audio-policy transcode-incompatible` converts incompatible audio to AAC). |
 | `mkv-fallback` | MP4, or MKV when needed | Uses MKV when a stream cannot go in MP4. |
+| `mkv` | Always MKV | Outputs Matroska (`.mkv`) for every converted file whose streams fit MKV. |
+| `keep` | Keep source container | Uses `.mkv` when the source was `.mkv` and otherwise uses `.mp4` (or falls back per compatibility rules). |
 
 Set with `--output-format` or the `output_format` config key.
 
@@ -115,7 +147,9 @@ Set with `--output-format` or the `output_format` config key.
 
 `--keep-original` renames each original to `<name>.old` once the result is
 verified. `--no-keep-original` replaces it. Neither applies to a conversion kept
-for review: both files always survive until the user chooses.
+for review: both files always survive until the user chooses. When `--output-dir`
+points elsewhere, originals in the source tree remain untouched and outputs are
+written under the mirror tree.
 
 ## Everything else
 
@@ -124,8 +158,14 @@ for review: both files always survive until the user chooses.
 | `--count N` | all | Convert at most N files. |
 | `--dry-run` | off | List what would happen, change nothing. |
 | `--tmp-dir PATH` | beside each video | Where working files go. |
+| `--output-dir PATH` | beside each video | Optional root directory mirroring the source folder layout. |
+| `--recursive` / `--no-recursive` | `true` | Recurse into subdirectories when discovering videos. |
 | `--review-margin N` | 2.0 | How far under the target a result may land before both files are kept. |
 | `--quality-threads N` | one per core | Threads used for quality measurement. |
+| `--fixed-quality N` | codec default | Explicit CRF/QP used when `--quality-mode fixed` is active. |
+| `--size-guard MODE` | `off` | Action when output is not smaller than source: `off`, `review`, or `skip`. |
+| `--audio-policy MODE` | `copy` | Audio handling: `copy`, or `transcode-incompatible` (AAC in MP4). |
+| `--deinterlace MODE` | `skip` | Interlaced source handling: `skip`, or `bwdif`. |
 | `--ffmpeg PATH`, `--ffprobe PATH` | bundled | Media tools to use. |
 | `--config PATH` | `config.yaml` | Settings file to read. |
 

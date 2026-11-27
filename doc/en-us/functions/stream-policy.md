@@ -9,7 +9,9 @@ Deciding which streams are mapped and which container can hold them. Described f
 | `chapters_are_placeholder_or_empty` | function | Classifies absent chapters or one unnamed full-duration chapter as an empty placeholder, returning true within practical muxer timestamp tolerance. |
 | `parse_bmff_chapter_targets` | function | Reads ISO BMFF structure to collect track IDs explicitly targeted by tref/chap references.. |
 | `matroska_incompatible_stream_reason` | function | Finds a mapped non-primary stream type not conservatively copy-compatible with Matroska, returning actual index/type/codec detail or none. |
+| `select_output_container_for_source` | function | Selects the output container matching `OutputFormat` and `AudioPolicy` compatibility rules, returning a container or skip reason. |
 | `mp4_incompatible_stream_reason` | function | Finds the first non-primary stream that cannot be copied into an MP4 container, returning a detail message or none. |
+| `mp4_incompatible_stream_reason_with_policy` | function | Evaluates MP4 stream copy compatibility honoring the active `AudioPolicy`, returning a detail reason or none. |
 | `is_mp4_copy_compatible_stream` | function | Checks whether a non-primary stream can be copied into the MP4 target, returning true when the stream type/codec is supported. |
 | `is_mp4_video_codec` | function | Checks whether a copied non-primary video codec is MP4-compatible, returning a boolean. |
 | `is_mp4_audio_codec` | function | Checks is mp4 audio codec predicate, returning a boolean. |

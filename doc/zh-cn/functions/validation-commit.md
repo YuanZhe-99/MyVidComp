@@ -9,7 +9,9 @@
 | `chapter_validation_error` | function | 比较预期与输出的章节数量、时间戳和完全一致的标题，在实际时间戳容差内返回详细的不符说明或无。 |
 | `pixel_format_validation_error` | function | 提供像素格式校验错误的行为，返回声明的结果。 |
 | `validate_stream_signature` | function | 校验流签名条件，返回成功、失败或测试断言结果。 |
+| `validate_stream_signature_with_audio` | function | 在允许被重编码音轨变更为 AAC 的前提下校验输出流签名，返回成功或错误。 |
 | `stream_signature_validation_error` | function | 提供流签名校验错误的行为，返回声明的结果。 |
+| `stream_signature_validation_error_with_audio` | function | 带可选已转码音频索引集合对比源与输出流签名，返回不符细节或无。 |
 | `display_metadata_validation_error` | function | 提供显示元数据校验错误的行为，返回声明的结果。 |
 | `display_metadata_matches` | function | 以有理数容差比较显示元数据中的宽高比，两值足够等价可通过校验时返回真。 |
 | `rational_metadata_matches` | function | 以适应容器改写的小容差比较有理数元数据值，比例在观感上等价时返回真。 |

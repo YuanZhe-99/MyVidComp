@@ -134,11 +134,13 @@ pub fn normalize_preservation_choice(value: &str) -> Result<Option<Preservation>
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum QualityMode {
     /// Encode short samples at several settings and pick the smallest one that
-    /// still reaches the quality target.
+    /// still reaches the target.
     #[default]
     Search,
     /// Derive a setting from the source bitrate and codec without test encodes.
     Estimate,
+    /// Use an explicit fixed CRF/QP value directly without searching or estimating.
+    Fixed,
 }
 
 impl QualityMode {
@@ -147,6 +149,7 @@ impl QualityMode {
         match self {
             QualityMode::Search => "search",
             QualityMode::Estimate => "estimate",
+            QualityMode::Fixed => "fixed",
         }
     }
 
@@ -155,6 +158,7 @@ impl QualityMode {
         match self {
             QualityMode::Search => "measure and tune",
             QualityMode::Estimate => "fast estimate",
+            QualityMode::Fixed => "fixed quality",
         }
     }
 }
@@ -164,8 +168,9 @@ pub fn parse_quality_mode(value: &str) -> Result<QualityMode, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "search" | "vmaf" | "measure" => Ok(QualityMode::Search),
         "estimate" | "fast" | "heuristic" => Ok(QualityMode::Estimate),
+        "fixed" | "crf" | "qp" | "manual" => Ok(QualityMode::Fixed),
         other => Err(format!(
-            "invalid quality mode: {other}. Supported values: search, estimate"
+            "invalid quality mode: {other}. Supported values: search, estimate, fixed"
         )),
     }
 }
@@ -182,11 +187,13 @@ pub fn normalize_quality_mode_choice(value: &str) -> Result<Option<QualityMode>,
 /// How thoroughly the finished file is compared against its source.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum QualityCheck {
+    /// Compare several short windows spread across the video. Fast and accurate.
+    #[default]
+    Segmented,
+    /// Compare every fifth frame across the whole file.
+    Sampled,
     /// Compare every frame. Accurate and slow.
     Full,
-    /// Compare every fifth frame. Close enough to decide, several times faster.
-    #[default]
-    Sampled,
     /// Do not compare. Flexible conversions are still measured, because their
     /// review decision depends on a score.
     Off,
@@ -196,6 +203,7 @@ impl QualityCheck {
     // AI-FUNC-SUMMARY: Maps a quality check to its stable wire value; returns static label; side effects: none.
     pub fn as_str(&self) -> &'static str {
         match self {
+            QualityCheck::Segmented => "segmented",
             QualityCheck::Full => "full",
             QualityCheck::Sampled => "sampled",
             QualityCheck::Off => "off",
@@ -205,6 +213,7 @@ impl QualityCheck {
     // AI-FUNC-SUMMARY: Maps a quality check to its human-readable log label; returns static label; side effects: none.
     pub fn label(&self) -> &'static str {
         match self {
+            QualityCheck::Segmented => "segmented spot check",
             QualityCheck::Full => "check every frame",
             QualityCheck::Sampled => "check sampled frames",
             QualityCheck::Off => "no quality check",
@@ -215,6 +224,7 @@ impl QualityCheck {
     pub fn subsample(&self) -> u32 {
         match self {
             QualityCheck::Full => 1,
+            QualityCheck::Segmented => 2,
             QualityCheck::Sampled | QualityCheck::Off => 5,
         }
     }
@@ -223,11 +233,12 @@ impl QualityCheck {
 // AI-FUNC-SUMMARY: Parses a quality-check wire value; returns the setting or a user-facing error; side effects: none.
 pub fn parse_quality_check(value: &str) -> Result<QualityCheck, String> {
     match value.trim().to_ascii_lowercase().as_str() {
+        "segmented" | "spot" | "quick" => Ok(QualityCheck::Segmented),
         "full" | "all" | "every" => Ok(QualityCheck::Full),
         "sampled" | "sample" | "fast" => Ok(QualityCheck::Sampled),
         "off" | "none" | "no" => Ok(QualityCheck::Off),
         other => Err(format!(
-            "invalid quality check: {other}. Supported values: full, sampled, off"
+            "invalid quality check: {other}. Supported values: segmented, sampled, full, off"
         )),
     }
 }
@@ -238,6 +249,238 @@ pub fn normalize_quality_check_choice(value: &str) -> Result<Option<QualityCheck
         Ok(None)
     } else {
         parse_quality_check(value).map(Some)
+    }
+}
+
+/// Which quality metric engine is used to score finished conversions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum QualityMetric {
+    /// Netflix VMAF via `libvmaf`. Most accurate perceptual model.
+    #[default]
+    Vmaf,
+    /// FFmpeg's built-in `xpsnr` filter. Much faster than VMAF.
+    Xpsnr,
+    /// Fast XPSNR gate first, verifying with VMAF only when borderline.
+    Auto,
+}
+
+impl QualityMetric {
+    // AI-FUNC-SUMMARY: Maps a quality metric to its stable wire value; returns static label; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QualityMetric::Vmaf => "vmaf",
+            QualityMetric::Xpsnr => "xpsnr",
+            QualityMetric::Auto => "auto",
+        }
+    }
+
+    // AI-FUNC-SUMMARY: Maps a quality metric to its human-readable log label; returns static label; side effects: none.
+    pub fn label(&self) -> &'static str {
+        match self {
+            QualityMetric::Vmaf => "VMAF",
+            QualityMetric::Xpsnr => "XPSNR (fast)",
+            QualityMetric::Auto => "Auto (XPSNR gate + VMAF verify)",
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses a quality-metric wire value; returns the metric or a user-facing error; side effects: none.
+pub fn parse_quality_metric(value: &str) -> Result<QualityMetric, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "vmaf" | "libvmaf" => Ok(QualityMetric::Vmaf),
+        "xpsnr" | "fast" => Ok(QualityMetric::Xpsnr),
+        "auto" | "hybrid" | "two-stage" => Ok(QualityMetric::Auto),
+        other => Err(format!(
+            "invalid quality metric: {other}. Supported values: vmaf, xpsnr, auto"
+        )),
+    }
+}
+
+// AI-FUNC-SUMMARY: Normalizes an optional quality-metric value; returns none for blank/default or a parsed metric; side effects: none.
+pub fn normalize_quality_metric_choice(value: &str) -> Result<Option<QualityMetric>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        Ok(None)
+    } else {
+        parse_quality_metric(trimmed).map(Some)
+    }
+}
+
+/// Speed vs compression-efficiency preset applied to software encoders.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EncoderPreset {
+    Fast,
+    #[default]
+    Balanced,
+    Slow,
+}
+
+impl EncoderPreset {
+    // AI-FUNC-SUMMARY: Maps an encoder preset to its stable wire value; returns static label; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EncoderPreset::Fast => "fast",
+            EncoderPreset::Balanced => "balanced",
+            EncoderPreset::Slow => "slow",
+        }
+    }
+
+    // AI-FUNC-SUMMARY: Maps an encoder preset to its human-readable log label; returns static label; side effects: none.
+    pub fn label(&self) -> &'static str {
+        match self {
+            EncoderPreset::Fast => "fast",
+            EncoderPreset::Balanced => "balanced",
+            EncoderPreset::Slow => "slow (smaller files)",
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses an encoder-preset wire value; returns the preset or a user-facing error; side effects: none.
+pub fn parse_encoder_preset(value: &str) -> Result<EncoderPreset, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "fast" | "faster" | "speed" => Ok(EncoderPreset::Fast),
+        "balanced" | "medium" | "normal" => Ok(EncoderPreset::Balanced),
+        "slow" | "slower" | "quality" | "small" => Ok(EncoderPreset::Slow),
+        other => Err(format!(
+            "invalid encoder preset: {other}. Supported values: fast, balanced, slow"
+        )),
+    }
+}
+
+// AI-FUNC-SUMMARY: Normalizes an optional encoder-preset value; returns none for blank/auto/default or a parsed preset; side effects: none.
+pub fn normalize_encoder_preset_choice(value: &str) -> Result<Option<EncoderPreset>, String> {
+    if is_unset_choice(value) {
+        Ok(None)
+    } else {
+        parse_encoder_preset(value).map(Some)
+    }
+}
+
+/// How non-MP4 audio streams are handled when targeting MP4 output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AudioPolicy {
+    /// Only copy audio streams verbatim. Incompatible streams skip or fall back to MKV.
+    #[default]
+    Copy,
+    /// Transcode MP4-incompatible audio streams to AAC and record the change for review.
+    TranscodeIncompatible,
+}
+
+impl AudioPolicy {
+    // AI-FUNC-SUMMARY: Maps an audio policy to its stable wire value; returns static label; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AudioPolicy::Copy => "copy",
+            AudioPolicy::TranscodeIncompatible => "transcode-incompatible",
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses an audio-policy wire value; returns the policy or a user-facing error; side effects: none.
+pub fn parse_audio_policy(value: &str) -> Result<AudioPolicy, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "copy" | "keep" => Ok(AudioPolicy::Copy),
+        "transcode-incompatible" | "transcode_incompatible" | "aac" | "transcode" => {
+            Ok(AudioPolicy::TranscodeIncompatible)
+        }
+        other => Err(format!(
+            "invalid audio policy: {other}. Supported values: copy, transcode-incompatible"
+        )),
+    }
+}
+
+// AI-FUNC-SUMMARY: Normalizes an optional audio-policy value; returns none for blank/auto/default or a parsed policy; side effects: none.
+pub fn normalize_audio_policy_choice(value: &str) -> Result<Option<AudioPolicy>, String> {
+    if is_unset_choice(value) {
+        Ok(None)
+    } else {
+        parse_audio_policy(value).map(Some)
+    }
+}
+
+/// How interlaced source videos are handled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DeinterlacePolicy {
+    /// Leave interlaced sources untouched (default safe behavior).
+    #[default]
+    Skip,
+    /// Deinterlace with `bwdif` and record the change for review.
+    Bwdif,
+}
+
+impl DeinterlacePolicy {
+    // AI-FUNC-SUMMARY: Maps a deinterlace policy to its stable wire value; returns static label; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeinterlacePolicy::Skip => "skip",
+            DeinterlacePolicy::Bwdif => "bwdif",
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses a deinterlace-policy wire value; returns the policy or a user-facing error; side effects: none.
+pub fn parse_deinterlace_policy(value: &str) -> Result<DeinterlacePolicy, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "skip" | "off" | "none" => Ok(DeinterlacePolicy::Skip),
+        "bwdif" | "deinterlace" | "on" => Ok(DeinterlacePolicy::Bwdif),
+        other => Err(format!(
+            "invalid deinterlace policy: {other}. Supported values: skip, bwdif"
+        )),
+    }
+}
+
+// AI-FUNC-SUMMARY: Normalizes an optional deinterlace-policy value; returns none for blank/auto/default or a parsed policy; side effects: none.
+pub fn normalize_deinterlace_policy_choice(
+    value: &str,
+) -> Result<Option<DeinterlacePolicy>, String> {
+    if is_unset_choice(value) {
+        Ok(None)
+    } else {
+        parse_deinterlace_policy(value).map(Some)
+    }
+}
+
+/// What happens when a finished conversion is not smaller than the source.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SizeGuard {
+    /// Commit normally regardless of output size.
+    #[default]
+    Off,
+    /// Keep both files for the user to review when the output is not smaller.
+    Review,
+    /// Discard the conversion and keep the original untouched when not smaller.
+    Skip,
+}
+
+impl SizeGuard {
+    // AI-FUNC-SUMMARY: Maps a size-guard policy to its stable wire value; returns static label; side effects: none.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SizeGuard::Off => "off",
+            SizeGuard::Review => "review",
+            SizeGuard::Skip => "skip",
+        }
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses a size-guard wire value; returns the policy or a user-facing error; side effects: none.
+pub fn parse_size_guard(value: &str) -> Result<SizeGuard, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" | "none" | "allow" => Ok(SizeGuard::Off),
+        "review" | "keep-review" => Ok(SizeGuard::Review),
+        "skip" | "discard" => Ok(SizeGuard::Skip),
+        other => Err(format!(
+            "invalid size guard: {other}. Supported values: off, review, skip"
+        )),
+    }
+}
+
+// AI-FUNC-SUMMARY: Normalizes an optional size-guard value; returns none for blank/auto/default or a parsed policy; side effects: none.
+pub fn normalize_size_guard_choice(value: &str) -> Result<Option<SizeGuard>, String> {
+    if is_unset_choice(value) {
+        Ok(None)
+    } else {
+        parse_size_guard(value).map(Some)
     }
 }
 
@@ -553,5 +796,51 @@ mod decoder_tests {
         }
         assert!(DecoderPreference::Auto.allows_hardware());
         assert!(!DecoderPreference::Cpu.allows_hardware());
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies new v0.3.1 quality, preset, audio, deinterlace, and size-guard options parse cleanly; returns nothing; side effects: none.
+    fn parses_extended_options() {
+        assert_eq!(QualityCheck::default(), QualityCheck::Segmented);
+        assert_eq!(
+            parse_quality_check("segmented"),
+            Ok(QualityCheck::Segmented)
+        );
+        assert_eq!(parse_quality_check("spot"), Ok(QualityCheck::Segmented));
+        assert_eq!(QualityCheck::Segmented.subsample(), 2);
+
+        assert_eq!(parse_quality_mode("fixed"), Ok(QualityMode::Fixed));
+        assert_eq!(parse_quality_metric("vmaf"), Ok(QualityMetric::Vmaf));
+        assert_eq!(parse_quality_metric("xpsnr"), Ok(QualityMetric::Xpsnr));
+        assert_eq!(parse_quality_metric("auto"), Ok(QualityMetric::Auto));
+        assert_eq!(
+            normalize_quality_metric_choice("auto"),
+            Ok(Some(QualityMetric::Auto))
+        );
+        assert_eq!(normalize_quality_metric_choice(""), Ok(None));
+
+        assert_eq!(parse_encoder_preset("fast"), Ok(EncoderPreset::Fast));
+        assert_eq!(
+            parse_encoder_preset("balanced"),
+            Ok(EncoderPreset::Balanced)
+        );
+        assert_eq!(parse_encoder_preset("slow"), Ok(EncoderPreset::Slow));
+
+        assert_eq!(parse_audio_policy("copy"), Ok(AudioPolicy::Copy));
+        assert_eq!(
+            parse_audio_policy("transcode-incompatible"),
+            Ok(AudioPolicy::TranscodeIncompatible)
+        );
+        assert_eq!(
+            parse_deinterlace_policy("skip"),
+            Ok(DeinterlacePolicy::Skip)
+        );
+        assert_eq!(
+            parse_deinterlace_policy("bwdif"),
+            Ok(DeinterlacePolicy::Bwdif)
+        );
+        assert_eq!(parse_size_guard("off"), Ok(SizeGuard::Off));
+        assert_eq!(parse_size_guard("review"), Ok(SizeGuard::Review));
+        assert_eq!(parse_size_guard("skip"), Ok(SizeGuard::Skip));
     }
 }

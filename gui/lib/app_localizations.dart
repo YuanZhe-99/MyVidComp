@@ -148,6 +148,48 @@ class AppText {
   String get automatic => _text('automatic');
   String get browse => _text('browse');
 
+  String get moreRunOptions => _text('moreRunOptions');
+  String get outputAndQuality => _text('outputAndQuality');
+  String get qualityMetricLabel => _text('qualityMetricLabel');
+  String get encoderPresetTitle => _text('encoderPresetTitle');
+  String get fixedQualityLabel => _text('fixedQualityLabel');
+  String get fixedQualityHelp => _text('fixedQualityHelp');
+  String get customQualityLabel => _text('customQualityLabel');
+  String get qualityThreadsLabel => _text('qualityThreadsLabel');
+  String get qualityThreadsHelp => _text('qualityThreadsHelp');
+  String get recursiveLabel => _text('recursiveLabel');
+  String get recursiveHelp => _text('recursiveHelp');
+  String get outputDirLabel => _text('outputDirLabel');
+  String get outputDirHelp => _text('outputDirHelp');
+  String get sizeGuardTitle => _text('sizeGuardTitle');
+  String get audioPolicyTitle => _text('audioPolicyTitle');
+  String get deinterlaceTitle => _text('deinterlaceTitle');
+  String get aboutLicenses => _text('aboutLicenses');
+  String get aboutLicensesHelp => _text('aboutLicensesHelp');
+  String get closeLabel => _text('closeLabel');
+  String get filterAll => _text('filterAll');
+  String get comparePreview => _text('comparePreview');
+  String get compareFrameTab => _text('compareFrameTab');
+  String get comparePlayTab => _text('comparePlayTab');
+  String get modeWipe => _text('modeWipe');
+  String get modeToggle => _text('modeToggle');
+  String get modeSideBySide => _text('modeSideBySide');
+  String get modeDiff => _text('modeDiff');
+  String get holdToCompareOrig => _text('holdToCompareOrig');
+  String get showingOriginal => _text('showingOriginal');
+  String get showingConverted => _text('showingConverted');
+  String get worstFrame => _text('worstFrame');
+  String get resetZoom => _text('resetZoom');
+  String get exportComparisonClip => _text('exportComparisonClip');
+  String get openOriginalExternal => _text('openOriginalExternal');
+  String get openConvertedExternal => _text('openConvertedExternal');
+  String get clipExported => _text('clipExported');
+  String get playLabel => _text('playLabel');
+  String get pauseLabel => _text('pauseLabel');
+  String get loadingPreview => _text('loadingPreview');
+  String get playbackPreparing => _text('playbackPreparing');
+  String get defaultsSection => _text('defaultsSection');
+
   // AI-FUNC-SUMMARY: Names one output codec; returns the label; side effects: none.
   String codecLabel(String value) => switch (value) {
     'av1' => _text('codecAv1'),
@@ -182,6 +224,7 @@ class AppText {
   String qualityModeLabel(String value) => switch (value) {
     'search' => _text('qualityModeSearch'),
     'estimate' => _text('qualityModeEstimate'),
+    'fixed' => _text('qualityModeFixed'),
     _ => value,
   };
 
@@ -189,11 +232,13 @@ class AppText {
   String qualityModeHelp(String value) => switch (value) {
     'search' => _text('qualityModeSearchHelp'),
     'estimate' => _text('qualityModeEstimateHelp'),
+    'fixed' => _text('qualityModeFixedHelp'),
     _ => '',
   };
 
   // AI-FUNC-SUMMARY: Names one quality-check choice; returns the label; side effects: none.
   String qualityCheckLabelFor(String value) => switch (value) {
+    'segmented' => _text('qualityCheckSegmented'),
     'sampled' => _text('qualityCheckSampled'),
     'full' => _text('qualityCheckFull'),
     'off' => _text('qualityCheckOff'),
@@ -202,9 +247,86 @@ class AppText {
 
   // AI-FUNC-SUMMARY: Explains what one quality-check choice means; returns the sentence; side effects: none.
   String qualityCheckHelp(String value) => switch (value) {
+    'segmented' => _text('qualityCheckSegmentedHelp'),
     'sampled' => _text('qualityCheckSampledHelp'),
     'full' => _text('qualityCheckFullHelp'),
     'off' => _text('qualityCheckOffHelp'),
+    _ => '',
+  };
+
+  // AI-FUNC-SUMMARY: Names one quality metric engine; returns the label; side effects: none.
+  String qualityMetricName(String value) => switch (value) {
+    'vmaf' => _text('metricVmaf'),
+    'xpsnr' => _text('metricXpsnr'),
+    'auto' => _text('metricAuto'),
+    _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Explains what one quality metric engine does; returns the sentence; side effects: none.
+  String qualityMetricHelp(String value) => switch (value) {
+    'vmaf' => _text('metricVmafHelp'),
+    'xpsnr' => _text('metricXpsnrHelp'),
+    'auto' => _text('metricAutoHelp'),
+    _ => '',
+  };
+
+  // AI-FUNC-SUMMARY: Names one encoder preset; returns the label; side effects: none.
+  String encoderPresetLabel(String value) => switch (value) {
+    'fast' => _text('presetFast'),
+    'balanced' => _text('presetBalanced'),
+    'slow' => _text('presetSlow'),
+    _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Explains what one encoder preset means; returns the sentence; side effects: none.
+  String encoderPresetHelp(String value) => switch (value) {
+    'fast' => _text('presetFastHelp'),
+    'balanced' => _text('presetBalancedHelp'),
+    'slow' => _text('presetSlowHelp'),
+    _ => '',
+  };
+
+  // AI-FUNC-SUMMARY: Names one size-guard choice; returns the label; side effects: none.
+  String sizeGuardLabel(String value) => switch (value) {
+    'off' => _text('sizeGuardOff'),
+    'review' => _text('sizeGuardReview'),
+    'skip' => _text('sizeGuardSkip'),
+    _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Explains what one size-guard choice means; returns the sentence; side effects: none.
+  String sizeGuardHelp(String value) => switch (value) {
+    'off' => _text('sizeGuardOffHelp'),
+    'review' => _text('sizeGuardReviewHelp'),
+    'skip' => _text('sizeGuardSkipHelp'),
+    _ => '',
+  };
+
+  // AI-FUNC-SUMMARY: Names one audio policy choice; returns the label; side effects: none.
+  String audioPolicyLabel(String value) => switch (value) {
+    'copy' => _text('audioCopy'),
+    'transcode-incompatible' => _text('audioTranscode'),
+    _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Explains what one audio policy choice means; returns the sentence; side effects: none.
+  String audioPolicyHelp(String value) => switch (value) {
+    'copy' => _text('audioCopyHelp'),
+    'transcode-incompatible' => _text('audioTranscodeHelp'),
+    _ => '',
+  };
+
+  // AI-FUNC-SUMMARY: Names one deinterlace policy choice; returns the label; side effects: none.
+  String deinterlaceLabel(String value) => switch (value) {
+    'skip' => _text('deinterlaceSkip'),
+    'bwdif' => _text('deinterlaceBwdif'),
+    _ => value,
+  };
+
+  // AI-FUNC-SUMMARY: Explains what one deinterlace policy choice means; returns the sentence; side effects: none.
+  String deinterlaceHelp(String value) => switch (value) {
+    'skip' => _text('deinterlaceSkipHelp'),
+    'bwdif' => _text('deinterlaceBwdifHelp'),
     _ => '',
   };
 
@@ -244,6 +366,8 @@ class AppText {
   String containerLabel(String value) => switch (value) {
     'mp4' => _text('containerMp4'),
     'mkv-fallback' => _text('containerMkvFallback'),
+    'mkv' => _text('containerMkv'),
+    'keep' => _text('containerKeep'),
     _ => value,
   };
 
@@ -251,6 +375,8 @@ class AppText {
   String containerHelp(String value) => switch (value) {
     'mp4' => _text('containerMp4Help'),
     'mkv-fallback' => _text('containerMkvFallbackHelp'),
+    'mkv' => _text('containerMkvHelp'),
+    'keep' => _text('containerKeepHelp'),
     _ => '',
   };
 
@@ -379,6 +505,7 @@ class AppText {
     'conflict' => _text('skipConflict'),
     'pending_review' => _text('skipPendingReview'),
     'kept_copy' => _text('skipKeptCopy'),
+    'larger_than_original' => _text('skipLargerThanOriginal'),
     _ => detail,
   };
 
@@ -655,6 +782,94 @@ const Map<String, Map<String, String>> _strings = {
     'tryingSetting': 'Trial run scored {score}',
     'featureUnavailable': 'Not available: {detail}',
     'settingsProblem': 'Your settings could not be saved: {detail}',
+    'moreRunOptions': 'More run options',
+    'outputAndQuality': 'Output & quality',
+    'qualityMetricLabel': 'Quality metric',
+    'encoderPresetTitle': 'Encoder speed preset',
+    'fixedQualityLabel': 'Fixed CRF / QP',
+    'fixedQualityHelp': 'Used directly when quality strategy is Fixed.',
+    'customQualityLabel': 'Custom target',
+    'qualityThreadsLabel': 'Quality check threads',
+    'qualityThreadsHelp': '0 matches CPU cores automatically.',
+    'recursiveLabel': 'Include subfolders',
+    'recursiveHelp': 'Scan nested folders inside the chosen video folder.',
+    'outputDirLabel': 'Separate output folder',
+    'outputDirHelp':
+        'Optional. Leave empty to replace or place next to originals.',
+    'sizeGuardTitle': 'When output is not smaller',
+    'audioPolicyTitle': 'Incompatible audio in MP4',
+    'deinterlaceTitle': 'Interlaced video',
+    'aboutLicenses': 'About & open-source licenses',
+    'aboutLicensesHelp': 'View MyApps-UI and GPL v3 license notice.',
+    'closeLabel': 'Close',
+    'filterAll': 'All',
+    'comparePreview': 'Compare',
+    'compareFrameTab': 'Frame inspect',
+    'comparePlayTab': 'Live clip',
+    'modeWipe': 'Wipe',
+    'modeToggle': 'A / B',
+    'modeSideBySide': 'Side by side',
+    'modeDiff': 'Diff map',
+    'holdToCompareOrig': 'Hold or press Space to view original',
+    'showingOriginal': 'Original',
+    'showingConverted': 'Converted',
+    'worstFrame': 'Worst frame',
+    'resetZoom': 'Reset zoom',
+    'exportComparisonClip': 'Export 6s clip',
+    'openOriginalExternal': 'Open original',
+    'openConvertedExternal': 'Open converted',
+    'clipExported': 'Comparison clip saved',
+    'playLabel': 'Play',
+    'pauseLabel': 'Pause',
+    'loadingPreview': 'Extracting aligned frames…',
+    'playbackPreparing': 'Preparing synchronized clip…',
+    'defaultsSection': 'Defaults & performance',
+    'skipLargerThanOriginal':
+        'Converted file was not smaller than the original',
+    'qualityModeFixed': 'Fixed value',
+    'qualityModeFixedHelp':
+        'Uses your fixed CRF/QP directly without sample tuning.',
+    'qualityCheckSegmented': 'Fast windows',
+    'qualityCheckSegmentedHelp':
+        'Checks several short windows across the video. Fastest.',
+    'metricVmaf': 'VMAF (accurate)',
+    'metricVmafHelp': 'Perceptual Netflix VMAF model. Standard accuracy.',
+    'metricXpsnr': 'XPSNR (fastest)',
+    'metricXpsnrHelp': 'Built-in perceptual PSNR. 10x+ faster than VMAF.',
+    'metricAuto': 'Auto (fast + verify)',
+    'metricAutoHelp':
+        'Runs XPSNR first and verifies with VMAF only when borderline.',
+    'presetFast': 'Fast',
+    'presetBalanced': 'Balanced',
+    'presetSlow': 'Slow',
+    'presetFastHelp': 'Shorter encodes, slightly larger files.',
+    'presetBalancedHelp': 'Recommended balance of speed and compression.',
+    'presetSlowHelp': 'Smallest software encodes, takes longer.',
+    'containerMkv': 'MKV always',
+    'containerKeep': 'Keep source type',
+    'containerMkvHelp':
+        'Always writes Matroska MKV files when streams are supported.',
+    'containerKeepHelp':
+        'Keeps MP4 for MP4/MOV sources and MKV for MKV sources.',
+    'sizeGuardOff': 'Allow',
+    'sizeGuardReview': 'Ask me',
+    'sizeGuardSkip': 'Skip',
+    'sizeGuardOffHelp': 'Commit normally regardless of output size.',
+    'sizeGuardReviewHelp':
+        'Keep both files for review if output is not smaller.',
+    'sizeGuardSkipHelp':
+        'Discard the output and keep the original if not smaller.',
+    'audioCopy': 'Copy only',
+    'audioTranscode': 'Convert to AAC',
+    'audioCopyHelp':
+        'Never re-encode audio; incompatible streams skip or use MKV.',
+    'audioTranscodeHelp':
+        'Converts non-MP4 audio tracks to AAC and keeps both files for review.',
+    'deinterlaceSkip': 'Leave untouched',
+    'deinterlaceBwdif': 'Deinterlace',
+    'deinterlaceSkipHelp': 'Skips interlaced videos safely.',
+    'deinterlaceBwdifHelp':
+        'Applies bwdif deinterlacing and keeps both files for review.',
   },
   'zh-Hans': {
     'tagline': '让视频更小，同时保住真正重要的画质。',
@@ -820,6 +1035,82 @@ const Map<String, Map<String, String>> _strings = {
     'tryingSetting': '试编码得分 {score}',
     'featureUnavailable': '无法使用：{detail}',
     'settingsProblem': '设置未能保存：{detail}',
+    'moreRunOptions': '更多任务选项',
+    'outputAndQuality': '输出与画质',
+    'qualityMetricLabel': '画质评分引擎',
+    'encoderPresetTitle': '编码速度预设',
+    'fixedQualityLabel': '固定 CRF / QP',
+    'fixedQualityHelp': '当画质策略选择“固定值”时直接使用。',
+    'customQualityLabel': '自定义目标值',
+    'qualityThreadsLabel': '画质检测线程数',
+    'qualityThreadsHelp': '填 0 表示自动匹配 CPU 核心数。',
+    'recursiveLabel': '包含子文件夹',
+    'recursiveHelp': '递归扫描所选文件夹下的嵌套子目录。',
+    'outputDirLabel': '独立输出文件夹',
+    'outputDirHelp': '可选。留空则原地替换或保存在原文件旁。',
+    'sizeGuardTitle': '输出未变小时',
+    'audioPolicyTitle': 'MP4 不兼容音轨',
+    'deinterlaceTitle': '隔行扫描视频',
+    'aboutLicenses': '关于与开源许可',
+    'aboutLicensesHelp': '查看 MyApps-UI 与 GNU GPL v3 声明。',
+    'closeLabel': '关闭',
+    'filterAll': '全部',
+    'comparePreview': '对比试看',
+    'compareFrameTab': '精帧对比',
+    'comparePlayTab': '同步片段',
+    'modeWipe': '卷帘',
+    'modeToggle': 'A / B',
+    'modeSideBySide': '并排',
+    'modeDiff': '差异图',
+    'holdToCompareOrig': '按住画面或空格键对比原片',
+    'showingOriginal': '原片',
+    'showingConverted': '新片',
+    'worstFrame': '最差帧',
+    'resetZoom': '重置缩放',
+    'exportComparisonClip': '导出 6 秒对比片',
+    'openOriginalExternal': '外部打开原片',
+    'openConvertedExternal': '外部打开新片',
+    'clipExported': '对比短片已保存',
+    'playLabel': '播放',
+    'pauseLabel': '暂停',
+    'loadingPreview': '正在提取对齐画面…',
+    'playbackPreparing': '正在生成同步片段…',
+    'defaultsSection': '默认行为与性能',
+    'skipLargerThanOriginal': '转换后文件未小于原文件',
+    'qualityModeFixed': '固定质量值',
+    'qualityModeFixedHelp': '直接使用指定的 CRF/QP，跳过样本搜索。',
+    'qualityCheckSegmented': '分段极速抽检',
+    'qualityCheckSegmentedHelp': '在片中均匀抽取数段短窗比对，速度最快。',
+    'metricVmaf': 'VMAF（精准）',
+    'metricVmafHelp': 'Netflix 感知画质模型，最精准但较慢。',
+    'metricXpsnr': 'XPSNR（极速）',
+    'metricXpsnrHelp': 'FFmpeg 内置感知指标，比 VMAF 快 10 倍以上。',
+    'metricAuto': '智能（极速+复核）',
+    'metricAutoHelp': '先用 XPSNR 极速筛查，仅在临界分数时用 VMAF 复核。',
+    'presetFast': '较快',
+    'presetBalanced': '均衡',
+    'presetSlow': '精细（更小）',
+    'presetFastHelp': '编码更快，文件略大。',
+    'presetBalancedHelp': '速度与压缩率的推荐平衡。',
+    'presetSlowHelp': '软件编码压缩率更高，耗时更长。',
+    'containerMkv': '始终 MKV',
+    'containerKeep': '保持原封装',
+    'containerMkvHelp': '在轨道兼容时始终输出 Matroska MKV。',
+    'containerKeepHelp': 'MP4/MOV 保持 MP4，MKV 保持 MKV。',
+    'sizeGuardOff': '正常提交',
+    'sizeGuardReview': '转入待决定',
+    'sizeGuardSkip': '跳过不保存',
+    'sizeGuardOffHelp': '无论文件是否变小都正常完成提交。',
+    'sizeGuardReviewHelp': '若未变小则保留两份文件等你决定。',
+    'sizeGuardSkipHelp': '若未变小则直接放弃结果，保留原文件。',
+    'audioCopy': '仅复制音轨',
+    'audioTranscode': '转为 AAC',
+    'audioCopyHelp': '不重编码音频；不兼容时跳过或改用 MKV。',
+    'audioTranscodeHelp': '将 MP4 不支持的音轨转为 AAC 并保留两份供确认。',
+    'deinterlaceSkip': '保持原样跳过',
+    'deinterlaceBwdif': '去交错转码',
+    'deinterlaceSkipHelp': '遇到隔行扫描片源时安全跳过。',
+    'deinterlaceBwdifHelp': '使用 bwdif 去交错并保留两份供确认。',
   },
   'zh-Hant': {
     'tagline': '讓影片更小，同時保住真正重要的畫質。',
@@ -985,6 +1276,82 @@ const Map<String, Map<String, String>> _strings = {
     'tryingSetting': '試編碼得分 {score}',
     'featureUnavailable': '無法使用：{detail}',
     'settingsProblem': '設定未能儲存：{detail}',
+    'moreRunOptions': '更多任務選項',
+    'outputAndQuality': '輸出與畫質',
+    'qualityMetricLabel': '畫質評分引擎',
+    'encoderPresetTitle': '編碼速度預設',
+    'fixedQualityLabel': '固定 CRF / QP',
+    'fixedQualityHelp': '當畫質策略選擇「固定值」時直接使用。',
+    'customQualityLabel': '自訂目標值',
+    'qualityThreadsLabel': '畫質檢測執行緒數',
+    'qualityThreadsHelp': '填 0 表示自動匹配 CPU 核心數。',
+    'recursiveLabel': '包含子資料夾',
+    'recursiveHelp': '遞迴掃描所選資料夾下的巢狀子目錄。',
+    'outputDirLabel': '獨立輸出資料夾',
+    'outputDirHelp': '選填。留空則原地取代或保存在原檔案旁。',
+    'sizeGuardTitle': '輸出未變小時',
+    'audioPolicyTitle': 'MP4 不相容音軌',
+    'deinterlaceTitle': '交錯掃描影片',
+    'aboutLicenses': '關於與開源授權',
+    'aboutLicensesHelp': '檢視 MyApps-UI 與 GNU GPL v3 聲明。',
+    'closeLabel': '關閉',
+    'filterAll': '全部',
+    'comparePreview': '對比試看',
+    'compareFrameTab': '精幀對比',
+    'comparePlayTab': '同步片段',
+    'modeWipe': '捲簾',
+    'modeToggle': 'A / B',
+    'modeSideBySide': '並排',
+    'modeDiff': '差異圖',
+    'holdToCompareOrig': '按住畫面或空白鍵對比原片',
+    'showingOriginal': '原片',
+    'showingConverted': '新片',
+    'worstFrame': '最差幀',
+    'resetZoom': '重設縮放',
+    'exportComparisonClip': '匯出 6 秒對比片',
+    'openOriginalExternal': '外部開啟原片',
+    'openConvertedExternal': '外部開啟新片',
+    'clipExported': '對比短片已儲存',
+    'playLabel': '播放',
+    'pauseLabel': '暫停',
+    'loadingPreview': '正在擷取對齊畫面…',
+    'playbackPreparing': '正在產生同步片段…',
+    'defaultsSection': '預設行為與效能',
+    'skipLargerThanOriginal': '轉換後檔案未小於原檔案',
+    'qualityModeFixed': '固定品質值',
+    'qualityModeFixedHelp': '直接使用指定的 CRF/QP，略過樣本搜尋。',
+    'qualityCheckSegmented': '分段極速抽檢',
+    'qualityCheckSegmentedHelp': '在片中均勻抽取數段短窗比對，速度最快。',
+    'metricVmaf': 'VMAF（精準）',
+    'metricVmafHelp': 'Netflix 感知畫質模型，最精準但較慢。',
+    'metricXpsnr': 'XPSNR（極速）',
+    'metricXpsnrHelp': 'FFmpeg 內建感知指標，比 VMAF 快 10 倍以上。',
+    'metricAuto': '智慧（極速+覆核）',
+    'metricAutoHelp': '先以 XPSNR 極速篩查，僅在臨界分數時以 VMAF 覆核。',
+    'presetFast': '較快',
+    'presetBalanced': '均衡',
+    'presetSlow': '精細（更小）',
+    'presetFastHelp': '編碼更快，檔案略大。',
+    'presetBalancedHelp': '速度與壓縮率的推薦平衡。',
+    'presetSlowHelp': '軟體編碼壓縮率更高，耗時較長。',
+    'containerMkv': '一律 MKV',
+    'containerKeep': '保持原封裝',
+    'containerMkvHelp': '在軌道相容時一律輸出 Matroska MKV。',
+    'containerKeepHelp': 'MP4/MOV 保持 MP4，MKV 保持 MKV。',
+    'sizeGuardOff': '正常提交',
+    'sizeGuardReview': '轉入待決定',
+    'sizeGuardSkip': '略過不儲存',
+    'sizeGuardOffHelp': '無論檔案是否變小皆正常完成提交。',
+    'sizeGuardReviewHelp': '若未變小則保留兩份檔案等你決定。',
+    'sizeGuardSkipHelp': '若未變小則直接放棄結果，保留原檔案。',
+    'audioCopy': '僅複製音軌',
+    'audioTranscode': '轉為 AAC',
+    'audioCopyHelp': '不重編碼音訊；不相容時略過或改用 MKV。',
+    'audioTranscodeHelp': '將 MP4 不支援的音軌轉為 AAC 並保留兩份供確認。',
+    'deinterlaceSkip': '保持原樣略過',
+    'deinterlaceBwdif': '去交錯轉碼',
+    'deinterlaceSkipHelp': '遇到交錯掃描片源時安全略過。',
+    'deinterlaceBwdifHelp': '使用 bwdif 去交錯並保留兩份供確認。',
   },
   'ja': {
     'tagline': '大切な画質はそのままに、動画を小さくします。',
@@ -1153,5 +1520,81 @@ const Map<String, Map<String, String>> _strings = {
     'tryingSetting': '試験変換のスコアは {score}',
     'featureUnavailable': '利用できません：{detail}',
     'settingsProblem': '設定を保存できませんでした：{detail}',
+    'moreRunOptions': '詳細な実行オプション',
+    'outputAndQuality': '出力と画質',
+    'qualityMetricLabel': '画質評価エンジン',
+    'encoderPresetTitle': 'エンコード速度プリセット',
+    'fixedQualityLabel': '固定 CRF / QP',
+    'fixedQualityHelp': '画質戦略が「固定値」のときに直接使用されます。',
+    'customQualityLabel': 'カスタム目標値',
+    'qualityThreadsLabel': '画質チェックのスレッド数',
+    'qualityThreadsHelp': '0 で CPU コア数に自動で合わせます。',
+    'recursiveLabel': 'サブフォルダを含める',
+    'recursiveHelp': '選んだフォルダ内のネストされたフォルダもスキャンします。',
+    'outputDirLabel': '別の出力フォルダ',
+    'outputDirHelp': '任意。空欄なら元の場所に置き換えるか並べて保存します。',
+    'sizeGuardTitle': '出力が小さくならないとき',
+    'audioPolicyTitle': 'MP4 非対応音声',
+    'deinterlaceTitle': 'インターレース映像',
+    'aboutLicenses': 'バージョン情報とライセンス',
+    'aboutLicensesHelp': 'MyApps-UI と GNU GPL v3 の表示を確認します。',
+    'closeLabel': '閉じる',
+    'filterAll': 'すべて',
+    'comparePreview': '比較プレビュー',
+    'compareFrameTab': '静止画比較',
+    'comparePlayTab': '同期再生',
+    'modeWipe': 'ワイプ',
+    'modeToggle': 'A / B',
+    'modeSideBySide': '並列',
+    'modeDiff': '差分マップ',
+    'holdToCompareOrig': '長押しまたは Space キーで元映像を表示',
+    'showingOriginal': '元映像',
+    'showingConverted': '変換後',
+    'worstFrame': '最低スコア箇所',
+    'resetZoom': 'ズームをリセット',
+    'exportComparisonClip': '6秒比較クリップを保存',
+    'openOriginalExternal': '元映像を外部で開く',
+    'openConvertedExternal': '変換後を外部で開く',
+    'clipExported': '比較クリップを保存しました',
+    'playLabel': '再生',
+    'pauseLabel': '一時停止',
+    'loadingPreview': '一致するフレームを抽出しています…',
+    'playbackPreparing': '同期クリップを準備しています…',
+    'defaultsSection': '既定の動作とパフォーマンス',
+    'skipLargerThanOriginal': '変換後のファイルが元のサイズを下回りませんでした',
+    'qualityModeFixed': '固定値',
+    'qualityModeFixedHelp': 'サンプル探索を省略し、指定した CRF/QP をそのまま使います。',
+    'qualityCheckSegmented': '区間スポット確認',
+    'qualityCheckSegmentedHelp': '動画全体から複数の短い区間を選んで比較します。最速です。',
+    'metricVmaf': 'VMAF（高精度）',
+    'metricVmafHelp': 'Netflix の知覚画質モデルです。高精度ですが時間はかかります。',
+    'metricXpsnr': 'XPSNR（超高速）',
+    'metricXpsnrHelp': 'FFmpeg 内蔵の高速指標です。VMAF より 10 倍以上高速です。',
+    'metricAuto': '自動（高速＋確認）',
+    'metricAutoHelp': 'まず XPSNR で高速判定し、境界付近のみ VMAF で再確認します。',
+    'presetFast': '高速',
+    'presetBalanced': 'バランス',
+    'presetSlow': '高圧縮（低速）',
+    'presetFastHelp': '処理が速く、ファイルサイズはやや大きくなります。',
+    'presetBalancedHelp': '速度と圧縮率のおすすめバランスです。',
+    'presetSlowHelp': 'ソフトウェア変換で最も小さくなりますが時間がかかります。',
+    'containerMkv': '常に MKV',
+    'containerKeep': '元の形式を維持',
+    'containerMkvHelp': 'トラックが対応している場合、常に MKV で出力します。',
+    'containerKeepHelp': 'MP4/MOV は MP4、MKV は MKV のまま出力します。',
+    'sizeGuardOff': 'そのまま適用',
+    'sizeGuardReview': '確認に回す',
+    'sizeGuardSkip': 'スキップ',
+    'sizeGuardOffHelp': 'サイズに関係なく通常どおり確定します。',
+    'sizeGuardReviewHelp': '小さくならなければ両方残して確認します。',
+    'sizeGuardSkipHelp': '小さくならなければ結果を破棄し、元ファイルを残します。',
+    'audioCopy': 'コピーのみ',
+    'audioTranscode': 'AAC に変換',
+    'audioCopyHelp': '音声を再変換しません。非対応ならスキップまたは MKV になります。',
+    'audioTranscodeHelp': 'MP4 非対応音声を AAC に変換し、確認用に両方残します。',
+    'deinterlaceSkip': 'そのままスキップ',
+    'deinterlaceBwdif': 'インターレース解除',
+    'deinterlaceSkipHelp': 'インターレース映像を安全にスキップします。',
+    'deinterlaceBwdifHelp': 'bwdif で解除し、確認用に両方残します。',
   },
 };

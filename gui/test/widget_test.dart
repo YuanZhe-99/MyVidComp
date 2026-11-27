@@ -158,6 +158,26 @@ void main() {
         for (final value in containerChoices) {
           expect(text.containerLabel(value), isNot(equals(value)));
         }
+        for (final value in qualityMetricChoices) {
+          expect(text.qualityMetricName(value), isNot(equals(value)));
+          expect(text.qualityMetricHelp(value), isNotEmpty);
+        }
+        for (final value in encoderPresetChoices) {
+          expect(text.encoderPresetLabel(value), isNot(equals(value)));
+          expect(text.encoderPresetHelp(value), isNotEmpty);
+        }
+        for (final value in sizeGuardChoices) {
+          expect(text.sizeGuardLabel(value), isNot(equals(value)));
+          expect(text.sizeGuardHelp(value), isNotEmpty);
+        }
+        for (final value in audioPolicyChoices) {
+          expect(text.audioPolicyLabel(value), isNot(equals(value)));
+          expect(text.audioPolicyHelp(value), isNotEmpty);
+        }
+        for (final value in deinterlaceChoices) {
+          expect(text.deinterlaceLabel(value), isNot(equals(value)));
+          expect(text.deinterlaceHelp(value), isNotEmpty);
+        }
       }
     });
 
@@ -239,6 +259,28 @@ void main() {
       expect(restored.language, 'ja');
       expect(restored.themeMode, 'dark');
       expect(restored.uiStyle, 'material3');
+
+      final v5 = settings.copyWith(
+        encoderPreset: 'slow',
+        qualityMetric: 'auto',
+        fixedQuality: 2600,
+        qualityThreads: 8,
+        recursive: false,
+        outputDir: '/out',
+        sizeGuard: 'review',
+        audioPolicy: 'transcode-incompatible',
+        deinterlace: 'bwdif',
+      );
+      final restoredV5 = AppSettings.fromJson(v5.toJson());
+      expect(restoredV5.encoderPreset, 'slow');
+      expect(restoredV5.qualityMetric, 'auto');
+      expect(restoredV5.fixedQuality, 2600);
+      expect(restoredV5.qualityThreads, 8);
+      expect(restoredV5.recursive, isFalse);
+      expect(restoredV5.outputDir, '/out');
+      expect(restoredV5.sizeGuard, 'review');
+      expect(restoredV5.audioPolicy, 'transcode-incompatible');
+      expect(restoredV5.deinterlace, 'bwdif');
     });
 
     test('settings from the previous version keep working', () {
@@ -750,6 +792,7 @@ void _wordingTests() {
         'conflict',
         'pending_review',
         'kept_copy',
+        'larger_than_original',
       ];
 
       for (final code in ['en', 'zh-Hans', 'zh-Hant', 'ja']) {
