@@ -110,8 +110,25 @@ are never left in an unknown state while idle.
 The run bar counts every file the run is finished with, skipped ones included, so a second pass over
 a folder that is already converted still reaches the end.
 
-Beside the file bar are the phase, the speed FFmpeg reports and the time left, and each line of the
-details log carries how serious it is.
+The card's title names what the current file is doing: choosing a quality setting (with the trial
+count), encoding, measuring quality, checking the converted file, or moving it into place, which
+becomes copying it when the folder for temporary files is on another drive. Under the file name a
+row of markers shows the phases this file goes through: which are done, which is under way and
+which are still to come.
+
+Beside the file bar are the percentage, the speed FFmpeg reports, how much of the commit copy is
+done, the time spent on the file and the time left; under the run bar are the time the run has
+spent and the time it has left. The times spent move every second, even through a phase that sends
+nothing of its own.
+
+While the commit copies the converted file, the engine keeps sending file progress whose time left
+comes from the copy speed, so the bar goes on to the end instead of stopping near 98% with a time
+left that never changes.
+
+Each line of the details log carries the time of day and how serious it is. Besides the engine's
+messages and the quality trials, the log records when each file starts, how long each phase took,
+each file's outcome with its total time and its time in each phase, and how long the whole run
+took. When a run ends, the totals also show the total time.
 
 ## Identity
 

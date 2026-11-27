@@ -81,16 +81,17 @@
 | `encoder_candidate_evaluated`、`encoder_selected` | 编码器检测期间 |
 | `decoder_selected` | 一次，说明本次运行采用的解码方式 |
 | `file_skipped` | 某个文件保持原样，并附上原因 |
-| `file_started`、`file_attempt`、`file_progress` | 某个文件转换期间 |
+| `file_started`、`file_attempt`、`file_progress` | 某个文件转换期间；`file_started` 按顺序列出该文件的 `phases`，`file_progress` 在提交阶段的复制过程中也会持续发出 |
 | `phase` | 文件的某个阶段开始，并给出它在该阶段最坏情况中的第几步 |
+| `phase_finished` | 文件的某个阶段结束，带 `elapsed_ms`；重试再次进入的阶段会再报告一次 |
 | `run_progress` | 整个运行的进度，跳过的文件也计入 |
 | `quality_search` | 调整搜索的一次试编码 |
 | `quality_measured` | 完成的转换已与源做过比较 |
 | `copy_progress`、`stage` | 耗时较长的非编码步骤期间 |
 | `review_pending` | 某次转换被保留下来等用户决定 |
-| `file_finished` | 一个文件处理完毕 |
+| `file_finished` | 一个文件处理完毕，带 `elapsed_ms` 和 `phase_ms`（按阶段顺序的各阶段毫秒数） |
 | `stop_requested` | 优雅停止已被接受 |
-| `summary` | 本次运行的汇总 |
+| `summary` | 本次运行的汇总，带整次运行（含扫描）的 `elapsed_ms` |
 
 事件内的取值都是稳定标识符（`hevc`、`flexible`、`mkv-fallback`、编码器名称）。所有给人看的文字都
 在应用程序一侧生成，因此引擎无需知道界面用的是哪种语言。

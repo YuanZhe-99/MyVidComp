@@ -86,16 +86,17 @@ Events arrive as compact JSON strings with a `type` field. The types are:
 | `encoder_candidate_evaluated`, `encoder_selected` | during encoder detection |
 | `decoder_selected` | once, naming the decoding method the run settled on |
 | `file_skipped` | a file was left alone, with the reason |
-| `file_started`, `file_attempt`, `file_progress` | during one file's conversion |
+| `file_started`, `file_attempt`, `file_progress` | during one file's conversion; `file_started` lists the file's `phases` in order, and `file_progress` keeps coming through the commit copy |
 | `phase` | one phase of a file begins, with its step out of the phase's worst case |
+| `phase_finished` | one phase of a file has ended, with `elapsed_ms`; a phase a retry enters again is reported again |
 | `run_progress` | how far the whole run has got, counting skipped files |
 | `quality_search` | one trial of a tuning search |
 | `quality_measured` | a finished conversion was compared with its source |
 | `copy_progress`, `stage` | during long non-encoding steps |
 | `review_pending` | a conversion was kept for the user to decide about |
-| `file_finished` | one file is done |
+| `file_finished` | one file is done, with `elapsed_ms` and `phase_ms` (milliseconds per phase, in phase order) |
 | `stop_requested` | a graceful stop was accepted |
-| `summary` | the run's totals |
+| `summary` | the run's totals, with `elapsed_ms` for the whole run, scan included |
 
 Values inside events are stable identifiers (`hevc`, `flexible`, `mkv-fallback`, encoder names).
 Everything a person reads is produced on the application side, so the engine never has to know

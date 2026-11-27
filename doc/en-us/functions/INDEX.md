@@ -8,7 +8,7 @@ GUI theme facade: [shared UI](../shared-ui.md) documents `gui/lib/app_theme.dart
 style-name parsing, branded shared-theme construction, light/dark methods and exports.
 The Rust declaration totals below are unaffected by this extraction.
 
-Total documented declarations in `src/`: **455**.
+Total documented declarations in `src/`: **462**.
 
 Every declaration carries an `AI-FUNC-SUMMARY` comment in the source, and every one of those
 appears on exactly one page below. The pages that mirror a module are the module; the pages that
@@ -23,7 +23,7 @@ itself is one file.
 | [review.md](review.md) | `src/review.rs` | 23 |
 | [preview.md](preview.md) | `src/preview.rs` | 14 |
 | [ffi-abi.md](ffi-abi.md) | `src/ffi.rs` | 32 |
-| [workflow-events.md](workflow-events.md) | the run, its events, progress, and commit | 81 |
+| [workflow-events.md](workflow-events.md) | the run, its events, progress, and commit | 88 |
 | [cli-and-config.md](cli-and-config.md) | command line and settings file | 28 |
 | [encoders-quality.md](encoders-quality.md) | encoder detection and quality estimation | 51 |
 | [discovery-probing.md](discovery-probing.md) | finding and probing files | 20 |

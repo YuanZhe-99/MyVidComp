@@ -363,6 +363,7 @@ enum WorkerEventType {
   fileAttempt('file_attempt'),
   fileProgress('file_progress'),
   copyProgress('copy_progress'),
+  phaseFinished('phase_finished'),
   phase('phase'),
   runProgress('run_progress'),
   stage('stage'),

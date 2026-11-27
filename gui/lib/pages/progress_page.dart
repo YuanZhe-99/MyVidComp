@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
@@ -63,10 +65,14 @@ class _StatusCard extends StatelessWidget {
       RunStage.idle => text.statusReady,
       RunStage.starting => text.statusStarting,
       RunStage.scanning => text.statusScanning,
-      RunStage.tuning => text.statusTuning,
-      RunStage.converting => text.statusConverting,
-      RunStage.measuring => text.statusMeasuring,
-      RunStage.finishing => text.statusFinishing,
+      RunStage.tuning => _phaseLabel(text, controller) ?? text.statusTuning,
+      RunStage.converting || RunStage.measuring || RunStage.finishing =>
+        _phaseLabel(text, controller) ??
+            switch (controller.stage) {
+              RunStage.converting => text.statusConverting,
+              RunStage.measuring => text.statusMeasuring,
+              _ => text.statusFinishing,
+            },
       RunStage.done => text.statusDone,
       RunStage.stopped => text.statusStopped,
       RunStage.failed => text.statusFailed,
@@ -106,6 +112,10 @@ class _StatusCard extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
+          if (controller.isActive && controller.filePhases.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _PhaseSteps(controller: controller),
+          ],
           const SizedBox(height: 12),
         ],
         LinearProgressIndicator(
@@ -117,7 +127,7 @@ class _StatusCard extends StatelessWidget {
         ),
         if (controller.isActive) ...[
           const SizedBox(height: 6),
-          _ProgressDetail(controller: controller),
+          _EverySecond(builder: (_) => _ProgressDetail(controller: controller)),
           const SizedBox(height: 14),
           Text(text.overallProgress, style: theme.textTheme.labelMedium),
           const SizedBox(height: 6),
@@ -126,13 +136,13 @@ class _StatusCard extends StatelessWidget {
             minHeight: 4,
             borderRadius: BorderRadius.circular(999),
           ),
-          if (controller.overallRemaining != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              text.timeLeft(formatDuration(controller.overallRemaining!)),
+          const SizedBox(height: 6),
+          _EverySecond(
+            builder: (_) => Text(
+              _runTimes(text, controller),
               style: theme.textTheme.bodySmall,
             ),
-          ],
+          ),
         ],
         if (controller.lastError != null) ...[
           const SizedBox(height: 14),
@@ -177,6 +187,11 @@ class _Totals extends StatelessWidget {
             ),
           if (saved > 0)
             CountTile(label: text.spaceSaved, value: formatBytes(saved)),
+          if (!controller.isActive && controller.runElapsed != null)
+            CountTile(
+              label: text.totalTime,
+              value: formatDuration(controller.runElapsed!),
+            ),
         ],
       ),
     );
@@ -356,7 +371,7 @@ class _DetailsLog extends StatelessWidget {
             constraints: const BoxConstraints(maxHeight: 280),
             child: ListView.separated(
               shrinkWrap: true,
-              itemCount: controller.log.length.clamp(0, 200),
+              itemCount: controller.log.length,
               separatorBuilder: (_, _) => const Divider(height: 12),
               itemBuilder: (context, index) =>
                   _LogLine(entry: controller.log[index]),
@@ -380,12 +395,18 @@ class _ProgressDetail extends StatelessWidget {
     final text = AppText.of(context);
     final theme = Theme.of(context);
 
+    final copied = controller.copiedBytes;
+    final copyTotal = controller.copyTotalBytes;
     final parts = <String>[
       formatPercent(controller.fileProgress),
-      if (controller.stage == RunStage.tuning && controller.trials > 0)
-        text.trialOfTotal(controller.trial, controller.trials),
       if (controller.speed != null && controller.speed != 'N/A')
         formatSpeed(controller.speed!),
+      if (copied != null && copyTotal != null && copyTotal > 0)
+        text.copiedOfTotal(formatBytes(copied), formatBytes(copyTotal)),
+      if (controller.fileStartedAt != null)
+        text.elapsed(
+          formatDuration(DateTime.now().difference(controller.fileStartedAt!)),
+        ),
       if (controller.fileRemaining != null)
         text.timeLeft(formatDuration(controller.fileRemaining!)),
     ];
@@ -418,6 +439,22 @@ class _LogLine extends StatelessWidget {
             : '${text.tryingSetting(formatScore(entry.score ?? 0))} '
                   '(${entry.setting})',
       LogKind.message => entry.message,
+      LogKind.fileStarted => text.logFileStarted(
+        entry.name ?? '',
+        entry.index,
+        entry.total,
+      ),
+      LogKind.phaseFinished => text.logPhaseFinished(
+        _stepName(text, entry.phase ?? ''),
+        formatDuration(entry.duration ?? Duration.zero),
+      ),
+      LogKind.fileFinished => _fileFinishedLine(text, entry),
+      LogKind.runFinished => text.logRunFinished(
+        formatDuration(entry.duration ?? Duration.zero),
+        converted: entry.counts.converted,
+        skipped: entry.counts.skipped,
+        failed: entry.counts.failed,
+      ),
     };
 
     final (icon, colour) = switch (entry.level) {
@@ -436,6 +473,16 @@ class _LogLine extends StatelessWidget {
           padding: const EdgeInsets.only(top: 2, right: 8),
           child: Icon(icon, size: 14, color: colour),
         ),
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Text(
+            _clock(entry.time),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
         Expanded(
           child: Text(
             message,
@@ -447,4 +494,180 @@ class _LogLine extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The phases of the current file in order, marking what is done, what is
+/// under way and what is still to come.
+class _PhaseSteps extends StatelessWidget {
+  const _PhaseSteps({required this.controller});
+
+  final AppController controller;
+
+  @override
+  // AI-FUNC-SUMMARY: Builds the row of phase markers for the current file; returns the widget; side effects: none.
+  Widget build(BuildContext context) {
+    final text = AppText.of(context);
+    final theme = Theme.of(context);
+    final phases = controller.filePhases;
+    final current = phases.indexOf(controller.phase ?? '');
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      children: [
+        for (var index = 0; index < phases.length; index++)
+          _PhaseStep(
+            label: _stepName(text, phases[index]),
+            state: current < 0 || index > current
+                ? _StepState.pending
+                : index < current
+                ? _StepState.done
+                : _StepState.current,
+            theme: theme,
+          ),
+      ],
+    );
+  }
+}
+
+enum _StepState { done, current, pending }
+
+/// One marker in the row of phases.
+class _PhaseStep extends StatelessWidget {
+  const _PhaseStep({
+    required this.label,
+    required this.state,
+    required this.theme,
+  });
+
+  final String label;
+  final _StepState state;
+  final ThemeData theme;
+
+  @override
+  // AI-FUNC-SUMMARY: Builds one phase marker with an icon for its state; returns the widget; side effects: none.
+  Widget build(BuildContext context) {
+    final scheme = theme.colorScheme;
+    final (icon, colour) = switch (state) {
+      _StepState.done => (Icons.check_circle, scheme.primary),
+      _StepState.current => (Icons.radio_button_checked, scheme.primary),
+      _StepState.pending => (Icons.radio_button_unchecked, scheme.outline),
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: colour),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: state == _StepState.pending
+                ? scheme.onSurfaceVariant
+                : scheme.onSurface,
+            fontWeight: state == _StepState.current ? FontWeight.w700 : null,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// AI-FUNC-SUMMARY: Names what the current file is doing from the engine's phase, with the trial count while choosing; returns the label, or none when no phase is known; side effects: none.
+String? _phaseLabel(AppText text, AppController controller) {
+  final label = switch (controller.phase) {
+    'choosing' => text.phaseChoosing,
+    'encoding' => text.phaseEncoding,
+    'measuring' => text.phaseMeasuring,
+    'validating' => text.phaseValidating,
+    'committing' =>
+      controller.copyTotalBytes != null
+          ? text.phaseCopying
+          : text.phaseCommitting,
+    _ => null,
+  };
+  if (label != null &&
+      controller.phase == 'choosing' &&
+      controller.trials > 0) {
+    return '$label  ·  ${text.trialOfTotal(controller.trial, controller.trials)}';
+  }
+  return label;
+}
+
+// AI-FUNC-SUMMARY: Gives the short name of one phase for the phase row and the log; returns the name, or the engine's word for an unknown phase; side effects: none.
+String _stepName(AppText text, String phase) => switch (phase) {
+  'choosing' => text.stepChoosing,
+  'encoding' => text.stepEncoding,
+  'measuring' => text.stepMeasuring,
+  'validating' => text.stepValidating,
+  'committing' => text.stepCommitting,
+  _ => phase,
+};
+
+// AI-FUNC-SUMMARY: Writes the log line for a finished file with its time in each phase; returns the sentence; side effects: none.
+String _fileFinishedLine(AppText text, LogEntry entry) {
+  final name = entry.name ?? '';
+  final total = formatDuration(entry.duration ?? Duration.zero);
+  final sentence = switch (entry.outcome) {
+    FileOutcome.failed => text.logFileFailed(name, total),
+    FileOutcome.needsReview => text.logFileKept(name, total),
+    _ => text.logFileConverted(name, total),
+  };
+  if (entry.phaseTimes.isEmpty) {
+    return sentence;
+  }
+  final parts = [
+    for (final (phase, duration) in entry.phaseTimes)
+      '${_stepName(text, phase)} ${formatDuration(duration)}',
+  ];
+  return '$sentence\n${parts.join('  ·  ')}';
+}
+
+// AI-FUNC-SUMMARY: Writes the run's time so far and time left; returns the line, or empty when neither is known; side effects: reads the clock.
+String _runTimes(AppText text, AppController controller) {
+  final started = controller.runStartedAt;
+  return [
+    if (started != null)
+      text.elapsed(formatDuration(DateTime.now().difference(started))),
+    if (controller.overallRemaining != null)
+      text.timeLeft(formatDuration(controller.overallRemaining!)),
+  ].join('  ·  ');
+}
+
+// AI-FUNC-SUMMARY: Formats the time of day a log line was written; returns hours, minutes and seconds; side effects: none.
+String _clock(DateTime time) =>
+    '${time.hour.toString().padLeft(2, '0')}:'
+    '${time.minute.toString().padLeft(2, '0')}:'
+    '${time.second.toString().padLeft(2, '0')}';
+
+/// Rebuilds its child once a second, so the time spent keeps moving even
+/// through a phase that sends no progress of its own.
+class _EverySecond extends StatefulWidget {
+  const _EverySecond({required this.builder});
+
+  final WidgetBuilder builder;
+
+  @override
+  State<_EverySecond> createState() => _EverySecondState();
+}
+
+class _EverySecondState extends State<_EverySecond> {
+  late final Timer _timer;
+
+  @override
+  // AI-FUNC-SUMMARY: Starts the one-second timer; returns none; side effects: schedules rebuilds.
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+
+  @override
+  // AI-FUNC-SUMMARY: Stops the timer; returns none; side effects: cancels scheduled rebuilds.
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  // AI-FUNC-SUMMARY: Builds the child for the current second; returns the widget; side effects: none.
+  Widget build(BuildContext context) => widget.builder(context);
 }

@@ -34,6 +34,18 @@ enum LogKind {
 
   /// One trial of a quality search, whose words are chosen when it is drawn.
   trial,
+
+  /// A file has started, with its position in the run.
+  fileStarted,
+
+  /// One phase of a file has ended, with how long it took.
+  phaseFinished,
+
+  /// A file is done, with its outcome, total time and time in each phase.
+  fileFinished,
+
+  /// The run is done, with its totals and how long it took.
+  runFinished,
 }
 
 /// One line of the details log.
@@ -41,13 +53,22 @@ enum LogKind {
 /// A trial keeps its numbers rather than a sentence, so the line can be written
 /// in the language the person is reading rather than the engine's English.
 class LogEntry {
-  const LogEntry({
+  LogEntry({
     required this.level,
     this.kind = LogKind.message,
     this.message = '',
     this.score,
     this.setting,
-  });
+    this.name,
+    this.phase,
+    this.duration,
+    this.phaseTimes = const [],
+    this.outcome,
+    this.index,
+    this.total,
+    this.counts = const (converted: 0, skipped: 0, failed: 0),
+    DateTime? time,
+  }) : time = time ?? DateTime.now();
 
   final LogLevel level;
   final LogKind kind;
@@ -58,6 +79,31 @@ class LogEntry {
 
   /// The encoder setting that produced it, such as `crf=28`.
   final String? setting;
+
+  /// When the line was written, shown in front of it.
+  final DateTime time;
+
+  /// The file a file line is about.
+  final String? name;
+
+  /// The engine's phase name, such as `encoding`, for a phase line.
+  final String? phase;
+
+  /// How long the phase, file or run took.
+  final Duration? duration;
+
+  /// Time spent in each phase of a finished file, in phase order.
+  final List<(String, Duration)> phaseTimes;
+
+  /// How a finished file ended.
+  final FileOutcome? outcome;
+
+  /// Which file of how many, for a file-started line.
+  final int? index;
+  final int? total;
+
+  /// The run's totals, for a run-finished line.
+  final ({int converted, int skipped, int failed}) counts;
 }
 
 /// One line in the progress list.
@@ -136,6 +182,14 @@ class AppController extends ChangeNotifier {
   Duration? _overallRemaining;
   int _trial = 0;
   int _trials = 0;
+  String? _phase;
+  List<String> _filePhases = const [];
+  final Set<String> _finishedPhases = {};
+  int? _copiedBytes;
+  int? _copyTotalBytes;
+  DateTime? _fileStartedAt;
+  DateTime? _runStartedAt;
+  Duration? _runElapsed;
   String? _lastError;
   String? _notice;
 
@@ -179,6 +233,28 @@ class AppController extends ChangeNotifier {
   /// Which trial of a quality search is under way, and how many it may need.
   int get trial => _trial;
   int get trials => _trials;
+
+  /// The engine's name for the phase the current file is in, such as
+  /// `encoding`, or null before the first file starts.
+  String? get phase => _phase;
+
+  /// The phases the current file goes through, in order.
+  List<String> get filePhases => _filePhases;
+
+  /// The phases of the current file that have ended at least once.
+  Set<String> get finishedPhases => _finishedPhases;
+
+  /// How much of the converted file has been copied into place, when the
+  /// commit has to copy rather than rename.
+  int? get copiedBytes => _copiedBytes;
+  int? get copyTotalBytes => _copyTotalBytes;
+
+  /// When the current file and the run began, for the time spent so far.
+  DateTime? get fileStartedAt => _fileStartedAt;
+  DateTime? get runStartedAt => _runStartedAt;
+
+  /// How long the last run took, as the engine measured it.
+  Duration? get runElapsed => _runElapsed;
   String? get lastError => _lastError;
   String? get notice => _notice;
   int get converted => _converted;
@@ -418,6 +494,14 @@ class AppController extends ChangeNotifier {
     _trial = 0;
     _trials = 0;
     _lastError = null;
+    _phase = null;
+    _filePhases = const [];
+    _finishedPhases.clear();
+    _copiedBytes = null;
+    _copyTotalBytes = null;
+    _fileStartedAt = null;
+    _runStartedAt = DateTime.now();
+    _runElapsed = null;
     _converted = 0;
     _skipped = 0;
     _failed = 0;
@@ -473,13 +557,34 @@ class AppController extends ChangeNotifier {
         _totalFiles = data['total'] as int? ?? _totalFiles;
         _currentFile = _fileName(data['input_path'] as String? ?? '');
         _fileProgress = 0;
+        _phase = null;
+        _filePhases = List.unmodifiable(
+          ((data['phases'] as List<Object?>?) ?? const []).whereType<String>(),
+        );
+        _finishedPhases.clear();
+        _copiedBytes = null;
+        _copyTotalBytes = null;
+        _fileStartedAt = DateTime.now();
+        _runStartedAt ??= _fileStartedAt;
+        _pushEntry(
+          LogEntry(
+            level: LogLevel.info,
+            kind: LogKind.fileStarted,
+            name: _currentFile,
+            index: _fileIndex,
+            total: _totalFiles,
+          ),
+          notify: false,
+        );
       case WorkerEventType.fileProgress:
         _fileProgress = ((data['percent'] as num?) ?? 0).toDouble();
         _speed = data['speed'] as String?;
         _fileRemaining = _seconds(data['eta_seconds']);
         _stage = _stageForPhase(data['phase'] as String?) ?? _stage;
+        _notePhase(data['phase'] as String?);
       case WorkerEventType.phase:
         _stage = _stageForPhase(data['phase'] as String?) ?? _stage;
+        _notePhase(data['phase'] as String?);
         if (_stage == RunStage.tuning) {
           _trial = data['step'] as int? ?? 0;
           _trials = data['steps'] as int? ?? 0;
@@ -492,6 +597,24 @@ class AppController extends ChangeNotifier {
         _overallRemaining = _seconds(data['eta_seconds']);
       case WorkerEventType.copyProgress:
         _stage = RunStage.finishing;
+        _phase = 'committing';
+        _copiedBytes = data['copied_bytes'] as int?;
+        _copyTotalBytes = data['total_bytes'] as int?;
+      case WorkerEventType.phaseFinished:
+        final finished = data['phase'] as String? ?? '';
+        if (finished.isNotEmpty) {
+          _finishedPhases.add(finished);
+          _pushEntry(
+            LogEntry(
+              level: LogLevel.info,
+              kind: LogKind.phaseFinished,
+              name: _currentFile,
+              phase: finished,
+              duration: _millis(data['elapsed_ms']),
+            ),
+            notify: false,
+          );
+        }
       case WorkerEventType.stage:
         break;
       case WorkerEventType.qualitySearch:
@@ -536,6 +659,16 @@ class AppController extends ChangeNotifier {
         _failed = summary['failed'] as int? ?? _failed;
         _sourceBytes = summary['source_bytes'] as int? ?? 0;
         _outputBytes = summary['output_bytes'] as int? ?? 0;
+        _runElapsed = _millis(data['elapsed_ms']);
+        _pushEntry(
+          LogEntry(
+            level: LogLevel.info,
+            kind: LogKind.runFinished,
+            duration: _runElapsed,
+            counts: (converted: _converted, skipped: _skipped, failed: _failed),
+          ),
+          notify: false,
+        );
       case WorkerEventType.stopRequested:
         _stage = RunStage.stopped;
       case WorkerEventType.settingsSelected:
@@ -551,20 +684,35 @@ class AppController extends ChangeNotifier {
 
   int? _lastScore;
 
-  // AI-FUNC-SUMMARY: Records the outcome of one finished file; returns none; side effects: updates the record list and counters.
+  // AI-FUNC-SUMMARY: Records the outcome of one finished file; returns none; side effects: updates the record list and counters and adds a timed line to the details log.
   void _recordFinished(Map<String, Object?> data) {
     final status = data['status'] as String? ?? '';
     final path = data['input_path'] as String? ?? '';
     final name = _fileName(path);
     final message = data['message'] as String? ?? '';
+    // A conversion kept for review was already recorded when it happened.
+    // Matched by full path: two folders can each hold a `clip.mp4`.
+    final alreadyRecorded = _records.any(
+      (record) =>
+          record.path == path && record.outcome == FileOutcome.needsReview,
+    );
+    _pushEntry(
+      LogEntry(
+        level: status == 'converted' ? LogLevel.info : LogLevel.error,
+        kind: LogKind.fileFinished,
+        name: name,
+        outcome: status != 'converted'
+            ? FileOutcome.failed
+            : alreadyRecorded
+            ? FileOutcome.needsReview
+            : FileOutcome.converted,
+        duration: _millis(data['elapsed_ms']),
+        phaseTimes: _phaseTimes(data['phase_ms']),
+      ),
+      notify: false,
+    );
 
     if (status == 'converted') {
-      // A conversion kept for review was already recorded when it happened.
-      // Matched by full path: two folders can each hold a `clip.mp4`.
-      final alreadyRecorded = _records.any(
-        (record) =>
-            record.path == path && record.outcome == FileOutcome.needsReview,
-      );
       if (!alreadyRecorded) {
         _converted += 1;
         _records.add(
@@ -654,6 +802,40 @@ class AppController extends ChangeNotifier {
     'committing' => RunStage.finishing,
     _ => null,
   };
+
+  // AI-FUNC-SUMMARY: Records which phase the current file is in from a progress or phase event; returns none; side effects: updates the stage and phase, and forgets copy figures outside the commit.
+  void _notePhase(String? phase) {
+    _stage = _stageForPhase(phase) ?? _stage;
+    if (phase == null || phase.isEmpty) {
+      return;
+    }
+    _phase = phase;
+    if (phase != 'committing') {
+      _copiedBytes = null;
+      _copyTotalBytes = null;
+    }
+  }
+
+  // AI-FUNC-SUMMARY: Turns a millisecond count from the engine into a duration; returns the duration, or none when it is missing or negative; side effects: none.
+  static Duration? _millis(Object? value) {
+    final millis = (value as num?)?.toInt();
+    if (millis == null || millis < 0) {
+      return null;
+    }
+    return Duration(milliseconds: millis);
+  }
+
+  // AI-FUNC-SUMMARY: Reads the per-phase times of a finished file; returns phase names with durations in the order the engine sent them; side effects: none.
+  static List<(String, Duration)> _phaseTimes(Object? value) {
+    if (value is! Map) {
+      return const [];
+    }
+    return [
+      for (final entry in value.entries)
+        if (entry.key is String && _millis(entry.value) != null)
+          (entry.key as String, _millis(entry.value)!),
+    ];
+  }
 
   // AI-FUNC-SUMMARY: Turns a whole-second count from the engine into a duration; returns the duration, or none when it is missing or zero; side effects: none.
   static Duration? _seconds(Object? value) {

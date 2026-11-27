@@ -1,5 +1,20 @@
 # Version history
 
+## 0.4.2 — Progress that says what it is doing, and a timed details log
+
+The file bar no longer stops near 98% with a time left that never changes while the commit copies
+the converted file to another drive: the engine now sends `file_progress` through the copy, with
+the time left taken from the copy speed, and the run's time left is never shorter than the file's.
+The status card names the phase (choosing with its trial count, encoding, measuring, checking, or
+moving or copying into place), shows a row of phase markers, how much of the copy is done, and the
+time spent on the file and the run, updated every second. The details log stamps every line with the
+time of day and records when each file starts, how long each phase took, each file's outcome with
+its total and per-phase times, and the whole run's time. New and extended events: `phase_finished`,
+`phases` on `file_started`, `elapsed_ms` and `phase_ms` on `file_finished`, and `elapsed_ms` on
+`summary`; the command line prints per-file phase times and the run time. The 0.4.0 x64 crash was
+confirmed, against Flutter 3.44.2's own symbols, to be `flutter/flutter#175041` inside the
+accessibility bridge, which 0.4.1's workaround addresses. CLI `0.4.2` and GUI `0.4.2+18`.
+
 ## 0.4.1 — Windows startup crash fix and P0 quality accuracy fixes
 
 Fixed the `flutter_windows.dll` access violation (`0xc0000005` in

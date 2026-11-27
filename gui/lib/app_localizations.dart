@@ -527,6 +527,67 @@ class AppText {
   String trialOfTotal(int trial, int total) =>
       _format('trialOfTotal', {'trial': '$trial', 'total': '$total'});
 
+  String get phaseChoosing => _text('phaseChoosing');
+  String get phaseEncoding => _text('phaseEncoding');
+  String get phaseMeasuring => _text('phaseMeasuring');
+  String get phaseValidating => _text('phaseValidating');
+  String get phaseCommitting => _text('phaseCommitting');
+  String get phaseCopying => _text('phaseCopying');
+  String get stepChoosing => _text('stepChoosing');
+  String get stepEncoding => _text('stepEncoding');
+  String get stepMeasuring => _text('stepMeasuring');
+  String get stepValidating => _text('stepValidating');
+  String get stepCommitting => _text('stepCommitting');
+  String get totalTime => _text('totalTime');
+
+  // AI-FUNC-SUMMARY: Says how much of the commit copy is done; returns the phrase; side effects: none.
+  String copiedOfTotal(String copied, String total) =>
+      _format('copiedOfTotal', {'copied': copied, 'total': total});
+
+  // AI-FUNC-SUMMARY: Says how long something has been running; returns the phrase; side effects: none.
+  String elapsed(String duration) => _format('elapsed', {'time': duration});
+
+  // AI-FUNC-SUMMARY: Writes the log line for a file that has started; returns the sentence; side effects: none.
+  String logFileStarted(String name, int? index, int? total) => total == null
+      ? _format('logFileStartedNoTotal', {
+          'name': name,
+          'index': '${index ?? 0}',
+        })
+      : _format('logFileStarted', {
+          'name': name,
+          'index': '${index ?? 0}',
+          'total': '$total',
+        });
+
+  // AI-FUNC-SUMMARY: Writes the log line for a phase that has ended; returns the sentence; side effects: none.
+  String logPhaseFinished(String phase, String duration) =>
+      _format('logPhaseFinished', {'phase': phase, 'time': duration});
+
+  // AI-FUNC-SUMMARY: Writes the log line for a converted file; returns the sentence; side effects: none.
+  String logFileConverted(String name, String duration) =>
+      _format('logFileConverted', {'name': name, 'time': duration});
+
+  // AI-FUNC-SUMMARY: Writes the log line for a conversion kept for review; returns the sentence; side effects: none.
+  String logFileKept(String name, String duration) =>
+      _format('logFileKept', {'name': name, 'time': duration});
+
+  // AI-FUNC-SUMMARY: Writes the log line for a file that could not be converted; returns the sentence; side effects: none.
+  String logFileFailed(String name, String duration) =>
+      _format('logFileFailed', {'name': name, 'time': duration});
+
+  // AI-FUNC-SUMMARY: Writes the log line for a finished run with its totals; returns the sentence; side effects: none.
+  String logRunFinished(
+    String duration, {
+    required int converted,
+    required int skipped,
+    required int failed,
+  }) => _format('logRunFinished', {
+    'time': duration,
+    'converted': '$converted',
+    'skipped': '$skipped',
+    'failed': '$failed',
+  });
+
   // AI-FUNC-SUMMARY: Reports a capability this installation lacks; returns the sentence; side effects: none.
   String featureUnavailable(String detail) =>
       _format('featureUnavailable', {'detail': detail});
@@ -641,6 +702,28 @@ const Map<String, Map<String, String>> _strings = {
     'smallerBy': '{percent}% smaller',
     'largerBy': '{percent}% larger',
     'trialOfTotal': 'trial {trial} of at most {total}',
+    'phaseChoosing': 'Choosing a quality setting',
+    'phaseEncoding': 'Encoding',
+    'phaseMeasuring': 'Measuring quality',
+    'phaseValidating': 'Checking the converted file',
+    'phaseCommitting': 'Moving the file into place',
+    'phaseCopying': 'Copying the file into place',
+    'stepChoosing': 'Choose',
+    'stepEncoding': 'Encode',
+    'stepMeasuring': 'Measure',
+    'stepValidating': 'Check',
+    'stepCommitting': 'Put in place',
+    'copiedOfTotal': '{copied} of {total} copied',
+    'elapsed': '{time} elapsed',
+    'totalTime': 'Total time',
+    'logFileStarted': 'Started {name} ({index} of {total})',
+    'logFileStartedNoTotal': 'Started {name} (file {index})',
+    'logPhaseFinished': '{phase} took {time}',
+    'logFileConverted': '{name} converted in {time}',
+    'logFileKept': '{name} is waiting for you after {time}',
+    'logFileFailed': '{name} could not be converted after {time}',
+    'logRunFinished':
+        'Run finished in {time}: {converted} converted, {skipped} left alone, {failed} could not be converted',
     'converted': 'Converted',
     'skipped': 'Left alone',
     'failed': 'Could not convert',
@@ -916,6 +999,28 @@ const Map<String, Map<String, String>> _strings = {
     'smallerBy': '小了 {percent}%',
     'largerBy': '大了 {percent}%',
     'trialOfTotal': '第 {trial} 次试编码，最多 {total} 次',
+    'phaseChoosing': '正在选择画质参数',
+    'phaseEncoding': '正在编码',
+    'phaseMeasuring': '正在测量画质',
+    'phaseValidating': '正在校验转换后的文件',
+    'phaseCommitting': '正在把文件放到位',
+    'phaseCopying': '正在把文件复制到位',
+    'stepChoosing': '选参数',
+    'stepEncoding': '编码',
+    'stepMeasuring': '测画质',
+    'stepValidating': '校验',
+    'stepCommitting': '提交',
+    'copiedOfTotal': '已复制 {copied} / {total}',
+    'elapsed': '已用 {time}',
+    'totalTime': '总用时',
+    'logFileStarted': '开始处理 {name}（第 {index} 个，共 {total} 个）',
+    'logFileStartedNoTotal': '开始处理 {name}（第 {index} 个）',
+    'logPhaseFinished': '{phase}用时 {time}',
+    'logFileConverted': '{name} 已转换，用时 {time}',
+    'logFileKept': '{name} 等你决定，用时 {time}',
+    'logFileFailed': '{name} 无法转换，用时 {time}',
+    'logRunFinished':
+        '本次运行用时 {time}：已转换 {converted} 个，保持原样 {skipped} 个，无法转换 {failed} 个',
     'converted': '已转换',
     'skipped': '保持原样',
     'failed': '无法转换',
@@ -1157,6 +1262,28 @@ const Map<String, Map<String, String>> _strings = {
     'smallerBy': '小了 {percent}%',
     'largerBy': '大了 {percent}%',
     'trialOfTotal': '第 {trial} 次試編碼，最多 {total} 次',
+    'phaseChoosing': '正在選擇畫質參數',
+    'phaseEncoding': '正在編碼',
+    'phaseMeasuring': '正在測量畫質',
+    'phaseValidating': '正在校驗轉換後的檔案',
+    'phaseCommitting': '正在把檔案放到位',
+    'phaseCopying': '正在把檔案複製到位',
+    'stepChoosing': '選參數',
+    'stepEncoding': '編碼',
+    'stepMeasuring': '測畫質',
+    'stepValidating': '校驗',
+    'stepCommitting': '提交',
+    'copiedOfTotal': '已複製 {copied} / {total}',
+    'elapsed': '已用 {time}',
+    'totalTime': '總用時',
+    'logFileStarted': '開始處理 {name}（第 {index} 個，共 {total} 個）',
+    'logFileStartedNoTotal': '開始處理 {name}（第 {index} 個）',
+    'logPhaseFinished': '{phase}用時 {time}',
+    'logFileConverted': '{name} 已轉換，用時 {time}',
+    'logFileKept': '{name} 等你決定，用時 {time}',
+    'logFileFailed': '{name} 無法轉換，用時 {time}',
+    'logRunFinished':
+        '本次執行用時 {time}：已轉換 {converted} 個，保持原樣 {skipped} 個，無法轉換 {failed} 個',
     'converted': '已轉換',
     'skipped': '保持原樣',
     'failed': '無法轉換',
@@ -1398,6 +1525,28 @@ const Map<String, Map<String, String>> _strings = {
     'smallerBy': '{percent}% 小さくなりました',
     'largerBy': '{percent}% 大きくなりました',
     'trialOfTotal': '試験変換 {trial} 回目（最大 {total} 回）',
+    'phaseChoosing': '画質設定を選んでいます',
+    'phaseEncoding': 'エンコード中',
+    'phaseMeasuring': '画質を測定しています',
+    'phaseValidating': '変換後のファイルを検証しています',
+    'phaseCommitting': 'ファイルを所定の場所に移しています',
+    'phaseCopying': 'ファイルを所定の場所にコピーしています',
+    'stepChoosing': '設定選択',
+    'stepEncoding': 'エンコード',
+    'stepMeasuring': '画質測定',
+    'stepValidating': '検証',
+    'stepCommitting': '配置',
+    'copiedOfTotal': '{total} 中 {copied} をコピー済み',
+    'elapsed': '経過 {time}',
+    'totalTime': '合計時間',
+    'logFileStarted': '{name} を開始（{total} 件中 {index} 件目）',
+    'logFileStartedNoTotal': '{name} を開始（{index} 件目）',
+    'logPhaseFinished': '{phase}：{time}',
+    'logFileConverted': '{name} を {time} で変換しました',
+    'logFileKept': '{name} は確認待ちです（{time}）',
+    'logFileFailed': '{name} は変換できませんでした（{time}）',
+    'logRunFinished':
+        '実行完了（{time}）：変換済み {converted} 件、そのまま {skipped} 件、変換できません {failed} 件',
     'converted': '変換済み',
     'skipped': 'そのまま',
     'failed': '変換できません',

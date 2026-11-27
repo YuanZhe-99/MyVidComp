@@ -25,7 +25,7 @@ mod vmaf;
 pub use ffi::{
     FfiEventCallback, FfiRunOptionsV1, FfiRunOptionsV2, FfiRunOptionsV3, MYVIDCOMP_FFI_ABI_VERSION,
 };
-use progress::{FileProgress, MeasurePlan, Phase, PhaseWeights, RunProgress};
+use progress::{FileProgress, MeasurePlan, PHASES, Phase, PhaseWeights, RunProgress};
 pub use review::{ReviewDecision, ReviewItem, list_reviews, resolve_review, review_list_json};
 pub use vmaf::{QualityMeasurement, VmafOptions, VmafScore};
 
@@ -343,6 +343,9 @@ pub enum Event {
         output_path: PathBuf,
         encoder: String,
         quality: String,
+        /// The phases this file will pass through, in order, so an interface
+        /// can show which are done and which are still to come.
+        phases: Vec<String>,
     },
     FileAttempt {
         index: usize,
@@ -371,6 +374,13 @@ pub enum Event {
         phase: String,
         step: usize,
         steps: usize,
+    },
+    /// One phase of a file has ended, with how long it took. A phase entered
+    /// again by a retry is reported again with only the new stretch.
+    PhaseFinished {
+        index: usize,
+        phase: String,
+        elapsed_ms: u64,
     },
     /// Which decoding method the run settled on.
     DecoderSelected {
@@ -404,10 +414,16 @@ pub enum Event {
         message: String,
         source_bytes: Option<u64>,
         output_bytes: Option<u64>,
+        /// How long the file took from its start, across every attempt.
+        elapsed_ms: u64,
+        /// The time spent in each phase, summed over retries, in phase order.
+        phase_ms: Vec<(String, u64)>,
     },
     StopRequested,
     Summary {
         summary: RunSummary,
+        /// How long the whole run took, scan included.
+        elapsed_ms: u64,
     },
 }
 
@@ -599,14 +615,16 @@ fn event_json(event: &Event) -> String {
             output_path,
             encoder,
             quality,
+            phases,
         } => format!(
-            "{{\"type\":\"file_started\",\"index\":{},\"total\":{},\"input_path\":{},\"output_path\":{},\"encoder\":{},\"quality\":{}}}",
+            "{{\"type\":\"file_started\",\"index\":{},\"total\":{},\"input_path\":{},\"output_path\":{},\"encoder\":{},\"quality\":{},\"phases\":{}}}",
             index,
             json_optional_usize(*total),
             json_path(input_path),
             json_path(output_path),
             json_string(encoder),
-            json_string(quality)
+            json_string(quality),
+            json_string_array(phases)
         ),
         Event::FileAttempt {
             index,
@@ -656,6 +674,16 @@ fn event_json(event: &Event) -> String {
             step,
             steps
         ),
+        Event::PhaseFinished {
+            index,
+            phase,
+            elapsed_ms,
+        } => format!(
+            "{{\"type\":\"phase_finished\",\"index\":{},\"phase\":{},\"elapsed_ms\":{}}}",
+            index,
+            json_string(phase),
+            elapsed_ms
+        ),
         Event::DecoderSelected { requested, method } => format!(
             "{{\"type\":\"decoder_selected\",\"requested\":{},\"method\":{}}}",
             json_string(requested),
@@ -699,19 +727,27 @@ fn event_json(event: &Event) -> String {
             message,
             source_bytes,
             output_bytes,
+            elapsed_ms,
+            phase_ms,
         } => format!(
-            "{{\"type\":\"file_finished\",\"index\":{},\"input_path\":{},\"status\":{},\"message\":{},\"source_bytes\":{},\"output_bytes\":{}}}",
+            "{{\"type\":\"file_finished\",\"index\":{},\"input_path\":{},\"status\":{},\"message\":{},\"source_bytes\":{},\"output_bytes\":{},\"elapsed_ms\":{},\"phase_ms\":{}}}",
             index,
             json_path(input_path),
             json_string(file_status_label(*status)),
             json_string(message),
             json_optional_u64(*source_bytes),
-            json_optional_u64(*output_bytes)
+            json_optional_u64(*output_bytes),
+            elapsed_ms,
+            phase_ms_json(phase_ms)
         ),
         Event::StopRequested => "{\"type\":\"stop_requested\"}".to_string(),
-        Event::Summary { summary } => format!(
-            "{{\"type\":\"summary\",\"summary\":{}}}",
-            summary_json(summary)
+        Event::Summary {
+            summary,
+            elapsed_ms,
+        } => format!(
+            "{{\"type\":\"summary\",\"summary\":{},\"elapsed_ms\":{}}}",
+            summary_json(summary),
+            elapsed_ms
         ),
     }
 }
@@ -784,6 +820,21 @@ fn json_optional_u64(value: Option<u64>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "null".to_string())
+}
+
+// AI-FUNC-SUMMARY: Serializes a list of strings to a JSON array; returns compact JSON text; side effects: none.
+fn json_string_array(values: &[String]) -> String {
+    let items: Vec<String> = values.iter().map(|value| json_string(value)).collect();
+    format!("[{}]", items.join(","))
+}
+
+// AI-FUNC-SUMMARY: Serializes per-phase durations to a JSON object keyed by phase name, in the order given; returns compact JSON text; side effects: none.
+fn phase_ms_json(phase_ms: &[(String, u64)]) -> String {
+    let items: Vec<String> = phase_ms
+        .iter()
+        .map(|(phase, ms)| format!("{}:{ms}", json_string(phase)))
+        .collect();
+    format!("{{{}}}", items.join(","))
 }
 
 // AI-FUNC-SUMMARY: Serializes a finite float to JSON; returns a number string with fallback for non-finite values; side effects: none.
@@ -941,6 +992,7 @@ fn run_workflow(
     terminal: bool,
 ) -> Result<RunSummary, String> {
     validate_run_options(&options)?;
+    let run_started = Instant::now();
     events.on_event(Event::Log {
         level: LogLevel::Info,
         message: version_label(),
@@ -1070,6 +1122,7 @@ fn run_workflow(
         };
         events.on_event(Event::Summary {
             summary: summary.clone(),
+            elapsed_ms: duration_ms(run_started.elapsed()),
         });
         return Ok(summary);
     }
@@ -1089,6 +1142,7 @@ fn run_workflow(
         };
         events.on_event(Event::Summary {
             summary: summary.clone(),
+            elapsed_ms: duration_ms(run_started.elapsed()),
         });
         return Ok(summary);
     }
@@ -1316,9 +1370,9 @@ fn run_workflow(
         }
         ui.emit_log(LogLevel::Info, message);
     }
-    ui.emit_summary(&summary);
+    ui.emit_summary(&summary, run_started.elapsed());
     if terminal {
-        print_summary(&summary);
+        print_summary(&summary, run_started.elapsed());
     }
     Ok(summary)
 }
@@ -6849,6 +6903,10 @@ struct ProgressUi<'a> {
     /// The phase weights every file in this run starts from, decided once from
     /// the settings so no file's bar can be shaped differently.
     weights: PhaseWeights,
+    /// The phase of the file in progress that is being timed, and since when.
+    phase_clock: Option<(Phase, Instant)>,
+    /// Time spent so far in each phase of the file in progress.
+    phase_times: Vec<(Phase, Duration)>,
 }
 
 struct GracefulExit {
@@ -6965,6 +7023,8 @@ impl<'a> ProgressUi<'a> {
             file: FileProgress::new(weights),
             run: RunProgress::default(),
             weights,
+            phase_clock: None,
+            phase_times: Vec::new(),
         }
     }
 
@@ -7028,6 +7088,7 @@ impl<'a> ProgressUi<'a> {
 
     // AI-FUNC-SUMMARY: Moves the file in progress into the phase a streamed run belongs to; returns none; side effects: updates progress state and emits a phase event.
     fn enter_phase(&mut self, run: StreamedRun) {
+        self.mark_phase(run.phase);
         if self.file.phase() != run.phase {
             self.file.finish_before(run.phase);
             self.file.enter(run.phase, run.steps);
@@ -7036,6 +7097,50 @@ impl<'a> ProgressUi<'a> {
         }
         self.file.enter_step(run.step);
         self.emit_phase(run.phase, run.step, run.steps);
+    }
+
+    // AI-FUNC-SUMMARY: Starts timing a phase unless it is the one already being timed; returns none; side effects: closes the previous phase's clock, which emits `phase_finished`.
+    fn mark_phase(&mut self, phase: Phase) {
+        if matches!(self.phase_clock, Some((current, _)) if current == phase) {
+            return;
+        }
+        self.close_phase_clock();
+        self.phase_clock = Some((phase, Instant::now()));
+    }
+
+    // AI-FUNC-SUMMARY:
+    // Purpose: Stops timing the phase in progress and records how long it took.
+    // Inputs: None.
+    // Returns: None.
+    // Side effects: Adds the stretch to that phase's total for the file and emits `phase_finished`.
+    // Notes: Does nothing when no phase is being timed, so every end-of-file path may call it.
+    fn close_phase_clock(&mut self) {
+        let Some((phase, since)) = self.phase_clock.take() else {
+            return;
+        };
+        let elapsed = since.elapsed();
+        match self.phase_times.iter_mut().find(|(seen, _)| *seen == phase) {
+            Some((_, total)) => *total += elapsed,
+            None => self.phase_times.push((phase, elapsed)),
+        }
+        self.events.on_event(Event::PhaseFinished {
+            index: self.current_index,
+            phase: phase.as_str().to_string(),
+            elapsed_ms: duration_ms(elapsed),
+        });
+    }
+
+    // AI-FUNC-SUMMARY: Lists the time the file in progress spent in each phase, in phase order; returns phase names with milliseconds; side effects: none.
+    fn phase_ms(&self) -> Vec<(String, u64)> {
+        PHASES
+            .iter()
+            .filter_map(|phase| {
+                self.phase_times
+                    .iter()
+                    .find(|(seen, _)| seen == phase)
+                    .map(|(_, total)| (phase.as_str().to_string(), duration_ms(*total)))
+            })
+            .collect()
     }
 
     // AI-FUNC-SUMMARY: Announces which phase of a file is under way; returns none; side effects: emits a phase event.
@@ -7181,12 +7286,20 @@ impl<'a> ProgressUi<'a> {
         }
     }
 
-    // AI-FUNC-SUMMARY: Provides start file behavior; returns the declared result; side effects: see implementation.
+    // AI-FUNC-SUMMARY: Starts one file; returns none; side effects: resets its progress and phase times, emits `file_started` with the phases it will pass through, and may print a terminal line.
     fn start_file(&mut self, index: usize, item: &WorkItem, encoder: &Encoder) {
         self.wait_until_prompt_inactive();
         self.current_index = index;
         self.file_started_at = Instant::now();
         self.file = FileProgress::new(self.weights);
+        self.phase_clock = None;
+        self.phase_times.clear();
+        let weights = self.weights;
+        let phases = PHASES
+            .iter()
+            .filter(|phase| weights.weight(**phase) > 0.0)
+            .map(|phase| phase.as_str().to_string())
+            .collect();
         let quality = item.quality_label(encoder, self.codec);
         self.events.on_event(Event::FileStarted {
             index: self.current_index,
@@ -7195,6 +7308,7 @@ impl<'a> ProgressUi<'a> {
             output_path: item.output_path.clone(),
             encoder: encoder.name.clone(),
             quality: quality.clone(),
+            phases,
         });
         if !self.terminal {
             return;
@@ -7275,28 +7389,9 @@ impl<'a> ProgressUi<'a> {
     // AI-FUNC-SUMMARY: Reports where the file and the run have got to; returns none; side effects: emits progress events and redraws the terminal line.
     fn emit_progress(&mut self, speed: Option<String>) {
         let percent = self.file.percent();
-        self.file.hold(percent);
-        let phase = self.file.phase();
-        let phase_percent = self.file.phase_percent();
         let eta = estimate_eta(percent, self.file_started_at.elapsed());
-        self.events.on_event(Event::FileProgress {
-            index: self.current_index,
-            percent,
-            phase: phase.as_str().to_string(),
-            phase_percent,
-            speed: speed.clone(),
-            eta_seconds: eta.as_secs(),
-        });
-
-        let overall = self.run.percent(percent);
-        let (processed, total) = self.run.counts();
-        let overall_eta = estimate_eta(overall, self.started_at.elapsed());
-        self.events.on_event(Event::RunProgress {
-            processed,
-            total,
-            percent: overall,
-            eta_seconds: overall_eta.as_secs(),
-        });
+        let (overall, overall_eta) = self.emit_progress_events(percent, speed.clone(), eta);
+        let phase = self.file.phase();
 
         if !self.terminal {
             return;
@@ -7317,7 +7412,46 @@ impl<'a> ProgressUi<'a> {
         let _ = io::stderr().flush();
     }
 
-    // AI-FUNC-SUMMARY: Provides render copy progress behavior; returns the declared result; side effects: see implementation.
+    // AI-FUNC-SUMMARY:
+    // Purpose: Sends the file and run progress events for an already computed file percentage.
+    // Inputs: The file percentage, an optional speed label, and the file's time left.
+    // Returns: The run percentage and the run's time left.
+    // Side effects: Raises the file's high-water mark and emits `file_progress` and `run_progress`.
+    // Notes: The run's time left is never shorter than the file's, since the file is part of the run. Draws nothing on the terminal.
+    fn emit_progress_events(
+        &mut self,
+        percent: f64,
+        speed: Option<String>,
+        eta: Duration,
+    ) -> (f64, Duration) {
+        self.file.hold(percent);
+        self.events.on_event(Event::FileProgress {
+            index: self.current_index,
+            percent,
+            phase: self.file.phase().as_str().to_string(),
+            phase_percent: self.file.phase_percent(),
+            speed,
+            eta_seconds: eta.as_secs(),
+        });
+
+        let overall = self.run.percent(percent);
+        let (processed, total) = self.run.counts();
+        let overall_eta = estimate_eta(overall, self.started_at.elapsed()).max(eta);
+        self.events.on_event(Event::RunProgress {
+            processed,
+            total,
+            percent: overall,
+            eta_seconds: overall_eta.as_secs(),
+        });
+        (overall, overall_eta)
+    }
+
+    // AI-FUNC-SUMMARY:
+    // Purpose: Reports how far the commit copy has got.
+    // Inputs: Bytes copied, bytes in total, and when the copy began.
+    // Returns: None.
+    // Side effects: Advances the commit phase, emits `file_progress`, `run_progress` and `copy_progress`, and redraws the terminal copy line.
+    // Notes: The file's time left comes from the copy's own speed, not the file's elapsed time, which would keep it near zero for a slow copy.
     fn render_copy_progress(&mut self, copied: u64, total: u64, started_at: Instant) {
         if self.prompt_active() {
             return;
@@ -7336,6 +7470,8 @@ impl<'a> ProgressUi<'a> {
         // The commit is the last phase of the file, so its own percentage also
         // carries the file's bar the rest of the way.
         self.file.advance(percent / 100.0);
+        let file_percent = self.file.percent();
+        self.emit_progress_events(file_percent, None, eta);
         self.events.on_event(Event::CopyProgress {
             index: self.current_index,
             percent,
@@ -7385,9 +7521,10 @@ impl<'a> ProgressUi<'a> {
         let _ = io::stderr().flush();
     }
 
-    // AI-FUNC-SUMMARY: Provides finish file behavior; returns the declared result; side effects: see implementation.
+    // AI-FUNC-SUMMARY: Closes the file in progress; returns none; side effects: stops the phase clock, fills the bar, and on a terminal prints the file time and the time in each phase.
     fn finish_file(&mut self, status: &str) {
         self.wait_until_prompt_inactive();
+        self.close_phase_clock();
         // Whatever the file did or did not go through, it is done with, so its
         // bar ends full rather than wherever the last phase left it.
         self.file.finish(Phase::Committing);
@@ -7404,10 +7541,21 @@ impl<'a> ProgressUi<'a> {
             format_duration(self.started_at.elapsed()),
             " ".repeat(20)
         );
+        let phases = self.phase_ms();
+        if !phases.is_empty() {
+            let parts: Vec<String> = phases
+                .iter()
+                .map(|(phase, ms)| {
+                    format!("{phase} {}", format_duration(Duration::from_millis(*ms)))
+                })
+                .collect();
+            eprintln!("    phases: {}", parts.join(", "));
+        }
     }
 
-    // AI-FUNC-SUMMARY: Emits a file-skipped event; returns none; side effects: sends a structured event.
+    // AI-FUNC-SUMMARY: Emits a file-skipped event; returns none; side effects: closes any phase being timed, sends a structured event and advances the run.
     fn emit_file_skipped(&mut self, path: &Path, reason: &str, reason_code: &str) {
+        self.close_phase_clock();
         self.events.on_event(Event::FileSkipped {
             path: path.to_path_buf(),
             reason: reason.to_string(),
@@ -7418,7 +7566,7 @@ impl<'a> ProgressUi<'a> {
         self.finish_candidate();
     }
 
-    // AI-FUNC-SUMMARY: Emits a file-finished event; returns none; side effects: sends a structured event.
+    // AI-FUNC-SUMMARY: Emits a file-finished event with the file time and the time in each phase; returns none; side effects: closes the phase clock and sends a structured event.
     fn emit_file_finished(
         &mut self,
         input_path: &Path,
@@ -7429,6 +7577,9 @@ impl<'a> ProgressUi<'a> {
         let (source_bytes, output_bytes) = result
             .map(|result| (Some(result.source_bytes), Some(result.output_bytes)))
             .unwrap_or((None, None));
+        self.close_phase_clock();
+        let elapsed_ms = duration_ms(self.file_started_at.elapsed());
+        let phase_ms = self.phase_ms();
         self.events.on_event(Event::FileFinished {
             index: self.current_index,
             input_path: input_path.to_path_buf(),
@@ -7436,6 +7587,8 @@ impl<'a> ProgressUi<'a> {
             message: message.to_string(),
             source_bytes,
             output_bytes,
+            elapsed_ms,
+            phase_ms,
         });
     }
 
@@ -7444,10 +7597,11 @@ impl<'a> ProgressUi<'a> {
         self.events.on_event(Event::StopRequested);
     }
 
-    // AI-FUNC-SUMMARY: Emits the final summary event; returns none; side effects: sends a structured event.
-    fn emit_summary(&mut self, summary: &RunSummary) {
+    // AI-FUNC-SUMMARY: Emits the final summary event with how long the whole run took; returns none; side effects: sends a structured event.
+    fn emit_summary(&mut self, summary: &RunSummary, elapsed: Duration) {
         self.events.on_event(Event::Summary {
             summary: summary.clone(),
+            elapsed_ms: duration_ms(elapsed),
         });
     }
 
@@ -7504,11 +7658,14 @@ fn conversion_size_label(result: ConversionResult) -> String {
     )
 }
 
-// AI-FUNC-SUMMARY: Provides print summary behavior; returns the declared result; side effects: see implementation.
-fn print_summary(summary: &RunSummary) {
+// AI-FUNC-SUMMARY: Prints the run totals and how long the run took; returns none; side effects: writes stdout.
+fn print_summary(summary: &RunSummary, elapsed: Duration) {
     println!(
-        "Done. converted={} skipped={} failed={}",
-        summary.converted, summary.skipped, summary.failed
+        "Done in {}. converted={} skipped={} failed={}",
+        format_duration(elapsed),
+        summary.converted,
+        summary.skipped,
+        summary.failed
     );
     if summary.converted > 0 {
         println!(
@@ -8225,6 +8382,11 @@ fn progress_bar(percent: f64) -> String {
     )
 }
 
+// AI-FUNC-SUMMARY: Converts a duration to whole milliseconds for an event; returns the count, saturating at u64::MAX; side effects: none.
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 // AI-FUNC-SUMMARY: Estimates the time left from the share done so far; returns the remaining duration, zero when the share is not a positive finite number, capped at about 136 years (`u32::MAX` seconds) so a near-zero share neither panics nor sends a front end a number it cannot hold; side effects: none.
 fn estimate_eta(percent: f64, elapsed: Duration) -> Duration {
     if !percent.is_finite() || percent <= 0.0 {
@@ -8914,6 +9076,89 @@ target_folder: "\\\\server\\share\\videos"
     }
 
     #[test]
+    // AI-FUNC-SUMMARY: Verifies that the commit copy moves the file's bar and takes its time left from the copy, so the bar no longer freezes near the end; returns test assertion result; side effects: none.
+    fn commit_copy_reports_file_progress() {
+        let mut seen = Vec::new();
+        {
+            let mut sink = |event: Event| seen.push(event);
+            let mut ui = ProgressUi::new(None, Arc::new(AtomicBool::new(false)), &mut sink, false);
+            ui.start_phase(Phase::Committing, 1);
+            // Half copied after ten seconds: about ten seconds of copying left.
+            let started = Instant::now() - Duration::from_secs(10);
+            ui.render_copy_progress(50, 100, started);
+        }
+        let file_progress: Vec<(f64, String, u64)> = seen
+            .iter()
+            .filter_map(|event| match event {
+                Event::FileProgress {
+                    percent,
+                    phase,
+                    eta_seconds,
+                    ..
+                } => Some((*percent, phase.clone(), *eta_seconds)),
+                _ => None,
+            })
+            .collect();
+        let (entered, _, _) = file_progress.first().unwrap().clone();
+        let (percent, phase, eta) = file_progress.last().unwrap().clone();
+        assert_eq!(phase, "committing");
+        assert!(
+            percent > entered && percent < 100.0,
+            "{entered} -> {percent}"
+        );
+        assert!((9..=11).contains(&eta), "eta {eta}");
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, Event::CopyProgress { .. }))
+        );
+        let run_eta = seen.iter().rev().find_map(|event| match event {
+            Event::RunProgress { eta_seconds, .. } => Some(*eta_seconds),
+            _ => None,
+        });
+        assert!(run_eta.unwrap() >= eta);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies that each phase is timed once per stretch and that the finished file carries its total time and per-phase times in phase order; returns test assertion result; side effects: none.
+    fn finished_file_reports_phase_times() {
+        let mut seen = Vec::new();
+        {
+            let mut sink = |event: Event| seen.push(event);
+            let mut ui = ProgressUi::new(None, Arc::new(AtomicBool::new(false)), &mut sink, false);
+            ui.start_phase(Phase::Validating, 2);
+            ui.start_phase_step(Phase::Validating, 2, 2);
+            ui.start_phase(Phase::Committing, 1);
+            ui.emit_file_finished(Path::new("clip.mp4"), FileStatus::Converted, "ok", None);
+            ui.finish_file("ok");
+            ui.emit_summary(&RunSummary::default(), Duration::from_millis(1_234));
+        }
+        let finished_phases: Vec<&str> = seen
+            .iter()
+            .filter_map(|event| match event {
+                Event::PhaseFinished { phase, .. } => Some(phase.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finished_phases, ["validating", "committing"]);
+        let phase_ms = seen
+            .iter()
+            .find_map(|event| match event {
+                Event::FileFinished { phase_ms, .. } => Some(phase_ms.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let names: Vec<&str> = phase_ms.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["validating", "committing"]);
+        assert!(seen.iter().any(|event| matches!(
+            event,
+            Event::Summary {
+                elapsed_ms: 1_234,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     // AI-FUNC-SUMMARY: Verifies that a failed copy fallback leaves no staging file behind; returns test assertion result; side effects: creates and removes temporary files.
     fn failed_copy_fallback_leaves_no_staging_file() {
         let root = make_temp_dir("move-copy-fails");
@@ -9044,6 +9289,52 @@ target_folder: "\\\\server\\share\\videos"
                     steps: 2,
                 },
                 "{\"type\":\"phase\",\"index\":2,\"phase\":\"measuring\",\"step\":1,\"steps\":2}",
+            ),
+            (
+                Event::PhaseFinished {
+                    index: 2,
+                    phase: "encoding".to_string(),
+                    elapsed_ms: 201_500,
+                },
+                "{\"type\":\"phase_finished\",\"index\":2,\"phase\":\"encoding\",\"elapsed_ms\":201500}",
+            ),
+            (
+                Event::FileStarted {
+                    index: 1,
+                    total: Some(3),
+                    input_path: PathBuf::from("clip.mp4"),
+                    output_path: PathBuf::from("clip.av1.mp4"),
+                    encoder: "libsvtav1".to_string(),
+                    quality: "crf=30".to_string(),
+                    phases: vec!["encoding".to_string(), "committing".to_string()],
+                },
+                "{\"type\":\"file_started\",\"index\":1,\"total\":3,\"input_path\":\"clip.mp4\",\"output_path\":\"clip.av1.mp4\",\"encoder\":\"libsvtav1\",\"quality\":\"crf=30\",\"phases\":[\"encoding\",\"committing\"]}",
+            ),
+            (
+                Event::FileFinished {
+                    index: 1,
+                    input_path: PathBuf::from("clip.mp4"),
+                    status: FileStatus::Converted,
+                    message: "converted".to_string(),
+                    source_bytes: Some(100),
+                    output_bytes: Some(40),
+                    elapsed_ms: 5_000,
+                    phase_ms: vec![
+                        ("encoding".to_string(), 4_000),
+                        ("committing".to_string(), 1_000),
+                    ],
+                },
+                "{\"type\":\"file_finished\",\"index\":1,\"input_path\":\"clip.mp4\",\"status\":\"converted\",\"message\":\"converted\",\"source_bytes\":100,\"output_bytes\":40,\"elapsed_ms\":5000,\"phase_ms\":{\"encoding\":4000,\"committing\":1000}}",
+            ),
+            (
+                Event::Summary {
+                    summary: RunSummary {
+                        converted: 1,
+                        ..RunSummary::default()
+                    },
+                    elapsed_ms: 62_000,
+                },
+                "{\"type\":\"summary\",\"summary\":{\"converted\":1,\"skipped\":0,\"failed\":0,\"source_bytes\":0,\"output_bytes\":0},\"elapsed_ms\":62000}",
             ),
             (
                 Event::RunProgress {

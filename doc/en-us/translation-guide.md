@@ -89,6 +89,9 @@ two trees file-by-file; both must match exactly.
 | validation | 验证 | |
 | metadata repair | 元数据修复 | 仅重封装以修正 AV1 元数据 |
 | commit | 提交 | 验证通过后临时输出替换源文件的最终步骤 |
+| phase | 阶段 | 一个文件依次经历的选参数、编码、测量画质、验证、提交 |
+| time spent / elapsed | 已用时间 / 已用 | 与"剩余时间"相对 |
+| commit copy | 提交复制 | 临时文件与目标不在同一个卷上时，提交改为先复制再重命名 |
 | temp file / temp output | 临时文件 / 临时输出 | `.myvidcomp-*.tmp.*` |
 | cached temp output | 缓存的临时输出 | 验证通过后复用的既有临时文件 |
 | graceful stop | 优雅停止 | 完成当前文件后停止 |

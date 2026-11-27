@@ -29,6 +29,8 @@
 | `json_optional_u32` | function | 为 JSON 输出序列化一个可选的 32 位计数，返回该数字或 null。 |
 | `json_optional_usize` | function | 把一个可选的 usize 序列化为 JSON，返回数字或 null 的 JSON 文本。 |
 | `json_optional_u64` | function | 把一个可选的 u64 序列化为 JSON，返回数字或 null 的 JSON 文本。 |
+| `json_string_array` | function | 把一个字符串列表序列化为 JSON 数组，返回紧凑的 JSON 文本。 |
+| `phase_ms_json` | function | 把各阶段用时按给定顺序序列化为以阶段名为键的 JSON 对象，返回紧凑的 JSON 文本。 |
 | `json_f64` | function | 把一个有限浮点数序列化为 JSON，返回数字字符串，非有限值有回退写法。 |
 | `log_level_label` | function | 把日志级别映射到它的 JSON 标签，返回静态标签。 |
 | `file_status_label` | function | 把文件状态映射到它的 JSON 标签，返回静态标签。 |
@@ -65,16 +67,20 @@
 | `emit_capability_missing` | function | 报告当前 ffmpeg 构建缺少的一项能力，无返回值。 |
 | `prompt_active` | function | 检查退出确认是否正占用终端，进度渲染应当暂停时返回真。 |
 | `wait_until_prompt_inactive` | function | 等到退出确认不再占用终端，结构化界面输出可以安全打印时返回。 |
-| `start_file` | function | 提供开始处理一个文件的行为，返回声明的结果。 |
+| `start_file` | function | 开始处理一个文件：重置它的进度和各阶段用时，并发出带有它将经历的各阶段的 `file_started`，无返回值。 |
 | `start_attempt` | function | 为当前文件开始一次编码器尝试，无返回值。 |
+| `mark_phase` | function | 开始为一个阶段计时，若它已在计时则不做任何事，无返回值；会先结束上一个阶段的计时。 |
+| `close_phase_clock` | function | 停止为当前阶段计时，把这段时间计入该阶段合计并发出 `phase_finished`，无返回值；没有阶段在计时时什么也不做。 |
+| `phase_ms` | function | 按阶段顺序列出当前文件在各阶段花的时间，返回阶段名和毫秒数。 |
 | `render_file_progress` | function | 提供渲染文件进度的行为，返回声明的结果。 |
-| `render_copy_progress` | function | 提供渲染复制进度的行为，返回声明的结果。 |
+| `emit_progress_events` | function | 按已算好的文件百分比发出 `file_progress` 和 `run_progress`，返回整次运行的百分比和剩余时间；整次运行的剩余时间绝不短于当前文件的剩余时间。 |
+| `render_copy_progress` | function | 报告提交阶段的复制进度，无返回值；用 `file_progress` 和 `run_progress` 推动文件进度条走完提交阶段，剩余时间按复制速度计算，然后发出 `copy_progress`。 |
 | `render_stage` | function | 提供渲染阶段的行为，返回声明的结果。 |
-| `finish_file` | function | 提供结束一个文件的行为，返回声明的结果。 |
-| `emit_file_skipped` | function | 发出一条文件被跳过的事件，无返回值。 |
-| `emit_file_finished` | function | 发出一条文件已完成的事件，无返回值。 |
+| `finish_file` | function | 结束当前文件，无返回值；停止阶段计时、把进度条填满，并在终端上打印文件用时和各阶段用时。 |
+| `emit_file_skipped` | function | 先结束正在计时的阶段，再发出一条文件被跳过的事件，无返回值。 |
+| `emit_file_finished` | function | 发出一条带有文件用时和各阶段用时的文件已完成事件，无返回值；会先结束阶段计时。 |
 | `emit_stop_requested` | function | 发出一条已请求停止的事件，无返回值。 |
-| `emit_summary` | function | 发出最终的摘要事件，无返回值。 |
+| `emit_summary` | function | 发出带有整次运行用时的最终摘要事件，无返回值。 |
 | `emit_log` | function | 发出一条不做终端渲染的日志事件，无返回值。 |
 | `log_info` | function | 发出一条信息级日志以及可选的终端行，无返回值。 |
 | `log_warning` | function | 发出一条警告级日志以及可选的终端行，无返回值。 |
@@ -83,6 +89,7 @@
 | `total_label` | function | 提供总计标签的行为，返回声明的结果。 |
 | `quality_label` | function | 提供画质标签的行为，返回声明的结果。 |
 | `conversion_size_label` | function | 格式化一次转换前后的字节数，返回一个简明的体积变化标签。 |
-| `print_summary` | function | 提供打印摘要的行为，返回声明的结果。 |
+| `print_summary` | function | 打印本次运行的合计和用时，无返回值。 |
+| `duration_ms` | function | 把一段时长换算成事件用的整毫秒数，返回该数值，超出时取 `u64::MAX`。 |
 | `print_dry_run` | function | 提供打印预览结果的行为，返回声明的结果。 |
 | `source_stream_policy` | function | 决定映射哪些流以及章节如何处理，不臆断任意文本/数据轨道可以丢弃。 |

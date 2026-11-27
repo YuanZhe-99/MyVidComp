@@ -29,6 +29,8 @@ readers in [../architecture.md](../architecture.md).
 | `json_optional_u32` | function | Serializes an optional 32-bit count for JSON output, returning the number or null. |
 | `json_optional_usize` | function | Serializes an optional usize to JSON, returning number or null JSON text. |
 | `json_optional_u64` | function | Serializes an optional u64 to JSON, returning number or null JSON text. |
+| `json_string_array` | function | Serializes a list of strings to a JSON array, returning compact JSON text. |
+| `phase_ms_json` | function | Serializes per-phase durations to a JSON object keyed by phase name, in the order given, returning compact JSON text. |
 | `json_f64` | function | Serializes a finite float to JSON, returning a number string with fallback for non-finite values. |
 | `log_level_label` | function | Maps a log level to its JSON label, returning static label. |
 | `file_status_label` | function | Maps a file status to its JSON label, returning static label. |
@@ -65,16 +67,20 @@ readers in [../architecture.md](../architecture.md).
 | `emit_capability_missing` | function | Reports a capability this ffmpeg build lacks, returning none. |
 | `prompt_active` | function | Checks whether quit confirmation currently owns the terminal, returning true while progress rendering should pause. |
 | `wait_until_prompt_inactive` | function | Waits until quit confirmation no longer owns the terminal, returning once structured UI output can safely print. |
-| `start_file` | function | Provides start file behavior, returning the declared result. |
+| `start_file` | function | Starts one file: resets its progress and phase times and emits `file_started` with the phases it will pass through, returning none. |
 | `start_attempt` | function | Starts one encoder attempt for the active file, returning none. |
+| `mark_phase` | function | Starts timing a phase unless it is already being timed, returning none; closes the previous phase clock. |
+| `close_phase_clock` | function | Stops timing the phase in progress, adds the stretch to its total and emits `phase_finished`, returning none; does nothing when no phase is timed. |
+| `phase_ms` | function | Lists the time the file in progress spent in each phase, in phase order, returning names with milliseconds. |
 | `render_file_progress` | function | Provides render file progress behavior, returning the declared result. |
-| `render_copy_progress` | function | Provides render copy progress behavior, returning the declared result. |
+| `emit_progress_events` | function | Sends `file_progress` and `run_progress` for a computed file percentage, returning the run percentage and time left; the run time left is never shorter than the file time left. |
+| `render_copy_progress` | function | Reports how far the commit copy has got, returning none; moves the file bar through the commit phase with `file_progress` and `run_progress` whose time left comes from the copy speed, then emits `copy_progress`. |
 | `render_stage` | function | Provides render stage behavior, returning the declared result. |
-| `finish_file` | function | Provides finish file behavior, returning the declared result. |
-| `emit_file_skipped` | function | Emits a file-skipped event, returning none. |
-| `emit_file_finished` | function | Emits a file-finished event, returning none. |
+| `finish_file` | function | Closes the file in progress, returning none; stops the phase clock, fills the bar and, on a terminal, prints the file time and the time in each phase. |
+| `emit_file_skipped` | function | Emits a file-skipped event after closing any phase being timed, returning none. |
+| `emit_file_finished` | function | Emits a file-finished event carrying the file time and the time in each phase, returning none; closes the phase clock first. |
 | `emit_stop_requested` | function | Emits a stop-requested event, returning none. |
-| `emit_summary` | function | Emits the final summary event, returning none. |
+| `emit_summary` | function | Emits the final summary event with how long the whole run took, returning none. |
 | `emit_log` | function | Emits a log event without terminal rendering, returning none. |
 | `log_info` | function | Emits an informational log and optional terminal line, returning none. |
 | `log_warning` | function | Emits a warning log and optional terminal line, returning none. |
@@ -83,6 +89,7 @@ readers in [../architecture.md](../architecture.md).
 | `total_label` | function | Provides total label behavior, returning the declared result. |
 | `quality_label` | function | Provides quality label behavior, returning the declared result. |
 | `conversion_size_label` | function | Formats one conversion's before/after byte counts, returning a concise size change label. |
-| `print_summary` | function | Provides print summary behavior, returning the declared result. |
+| `print_summary` | function | Prints the run totals and how long the run took, returning none. |
+| `duration_ms` | function | Converts a duration to whole milliseconds for an event, returning the count, saturating at `u64::MAX`. |
 | `print_dry_run` | function | Provides print dry run behavior, returning the declared result. |
 | `source_stream_policy` | function | Determines mapped streams and chapter behavior without guessing that arbitrary text/data tracks are disposable.. |

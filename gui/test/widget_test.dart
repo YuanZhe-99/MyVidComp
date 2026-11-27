@@ -621,7 +621,57 @@ void main() {
         expect(bar.value, isNotNull);
       }
       expect(bars.first.value, closeTo(0.84, 0.001));
-      expect(find.text(text.statusMeasuring), findsOneWidget);
+      expect(find.text(text.phaseMeasuring), findsOneWidget);
+    });
+
+    testWidgets('the commit copy names itself and moves the bar', (
+      tester,
+    ) async {
+      final controller = _testController();
+      controller.handleEvent(
+        _event('file_started', {
+          'index': 1,
+          'total': 2,
+          'input_path': r'D:videosholiday.mp4',
+          'phases': ['encoding', 'validating', 'committing'],
+        }),
+      );
+      controller.handleEvent(
+        _event('phase', {'phase': 'committing', 'step': 1, 'steps': 1}),
+      );
+      controller.handleEvent(
+        _event('file_progress', {
+          'percent': 98.9,
+          'phase': 'committing',
+          'phase_percent': 50.0,
+          'speed': null,
+          'eta_seconds': 120,
+        }),
+      );
+      controller.handleEvent(
+        _event('copy_progress', {
+          'percent': 50.0,
+          'copied_bytes': 1024 * 1024 * 512,
+          'total_bytes': 1024 * 1024 * 1024,
+          'eta_seconds': 120,
+        }),
+      );
+
+      await _pumpAt(tester, const Size(1000, 900), controller: controller);
+      final text = AppText.forCode('en');
+      await tester.tap(find.text(text.navActivity).first);
+      await tester.pump();
+
+      expect(find.text(text.phaseCopying), findsOneWidget);
+      expect(find.text(text.stepEncoding), findsOneWidget);
+      expect(find.text(text.stepCommitting), findsOneWidget);
+      expect(find.textContaining(text.timeLeft('2:00')), findsOneWidget);
+      final bar = tester
+          .widgetList<LinearProgressIndicator>(
+            find.byType(LinearProgressIndicator),
+          )
+          .first;
+      expect(bar.value, closeTo(0.989, 0.001));
     });
   });
 }
@@ -712,6 +762,67 @@ void _progressTests() {
       expect(controller.stage, RunStage.tuning);
       expect(controller.trial, 3);
       expect(controller.trials, 39);
+    });
+
+    test('the details log times each phase, each file and the run', () {
+      final controller = _testController();
+
+      controller.handleEvent(
+        _event('file_started', {
+          'index': 1,
+          'total': 1,
+          'input_path': r'D:videosholiday.mp4',
+          'phases': ['encoding', 'committing'],
+        }),
+      );
+      controller.handleEvent(
+        _event('phase_finished', {'phase': 'encoding', 'elapsed_ms': 201500}),
+      );
+      controller.handleEvent(
+        _event('file_finished', {
+          'input_path': r'D:videosholiday.mp4',
+          'status': 'converted',
+          'message': 'converted',
+          'elapsed_ms': 210000,
+          'phase_ms': {'encoding': 201500, 'committing': 8500},
+        }),
+      );
+      controller.handleEvent(
+        _event('summary', {
+          'summary': {'converted': 1, 'skipped': 0, 'failed': 0},
+          'elapsed_ms': 215000,
+        }),
+      );
+
+      final kinds = controller.log.reversed.map((entry) => entry.kind).toList();
+      expect(kinds, [
+        LogKind.fileStarted,
+        LogKind.phaseFinished,
+        LogKind.fileFinished,
+        LogKind.runFinished,
+      ]);
+      final phase = controller.log.firstWhere(
+        (entry) => entry.kind == LogKind.phaseFinished,
+      );
+      expect(phase.phase, 'encoding');
+      expect(phase.duration, const Duration(milliseconds: 201500));
+      final file = controller.log.firstWhere(
+        (entry) => entry.kind == LogKind.fileFinished,
+      );
+      expect(file.outcome, FileOutcome.converted);
+      expect(file.duration, const Duration(seconds: 210));
+      expect(file.phaseTimes.map((part) => part.$1), [
+        'encoding',
+        'committing',
+      ]);
+      expect(controller.runElapsed, const Duration(seconds: 215));
+      expect(controller.log.first.counts.converted, 1);
+
+      final text = AppText.forCode('zh-Hans');
+      expect(
+        text.logRunFinished('3:35', converted: 1, skipped: 0, failed: 0),
+        contains('3:35'),
+      );
     });
 
     test('a trial keeps its numbers rather than an English sentence', () {
