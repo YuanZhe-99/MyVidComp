@@ -7,10 +7,13 @@
 |---|---|---|
 | `points` | function | 把分数换算为 VMAF 分值，以浮点数返回该分数。 |
 | `default` | function | 构造默认的测量选项，返回在所有核心上做抽样测量的设置。 |
-| `detect_vmaf_support` | function | 检查当前 FFmpeg 构建能否测量画质，返回支持情况，不支持时附带原因。 |
+| `detect_vmaf_hdr_v1_support` | function | 通过单帧合成探针检查当前 FFmpeg 构建是否支持 `hdr_vmaf_v1.1.8_3d0h`，返回布尔值。 |
+| `detect_vmaf_support` | function | 检查当前 FFmpeg 构建能否测量画质及是否支持 HDR VMAF v1，返回支持情况，不支持时附带原因。 |
 | `model_for` | function | 选择与源分辨率相称的 VMAF 模型，返回内置模型名称。 |
+| `model_for_with_support` | function | 按分辨率与 HDR 传输特性选择 VMAF 模型，支持时把 PQ（`smpte2084`）路由至 `hdr_vmaf_v1.1.8`。 |
+| `accuracy_caveat_with_support` | function | 根据 HDR 模型能力报告当前源是否由原生模型准确评估，或需要附带不准提示句。 |
 | `comparison_pixel_format` | function | 选择两路比较输入都能转换到的像素格式，返回一种 libvmaf 接受的平面 YUV 格式。 |
-| `build_vmaf_args` | function | 构造把转换结果与其源做比较的 ffmpeg 参数，返回参数列表。 |
+| `build_vmaf_args` | function | 构造把转换结果与其源做比较的 ffmpeg 参数（可选启用 HDR v1 与 JSON 逐帧日志），返回参数列表。 |
 | `parse_vmaf_score` | function | 从 ffmpeg 输出中读取汇总分数，以百分之一单位返回该分数，未打印分数时返回无。 |
 | `measure_vmaf` | function | 把一个转换结果与其源做比较测量，返回该分数或一条面向用户的错误。 |
 | `accuracy_caveat` | function | 报告某个源是否属于 VMAF 无法可靠判断的类型，返回一句提醒或无。 |
@@ -37,11 +40,25 @@
 | `parse_keyframe_timestamps` | function | 解析 `ffprobe` 输出的关键帧 CSV 时间戳，返回排序去重后的秒数列表。 |
 | `probe_keyframes` | function | 通过 `ffprobe` 仅扫包头探测视频关键帧时间戳，返回排序后的秒数列表。 |
 | `align_windows_to_keyframes` | function | 将计划的分段窗口吸附到转换成品的真实关键帧并剔除过近重复窗口，返回对齐后的窗口。 |
-| `build_segmented_vmaf_args` | function | 构造对转换流直接关键帧跳转、对源流采用两段混合跳转与 `trim` 对齐的分段 `libvmaf` 参数，返回参数列表。 |
+| `parse_packet_samples` | function | 把 `ffprobe` 输出的包头 CSV 行（`pts_time,size,flags`）解析为不解码视频帧的包样本列表。 |
+| `probe_packets` | function | 通过 `ffprobe` 扫描视频包头（零解码），返回解析后的包样本列表。 |
+| `dual_pool_plan` | function | 基于零解码包扫描构建彼此隔离的双池分段抽检计划（A 池复杂度分层 + B 池风险探针）并对齐关键帧，返回窗口或无。 |
+| `snap_to_keyframe` | function | 在时长范围内把单个分段窗口吸附到最近的成品关键帧，返回起始秒数。 |
+| `escape_filter_path` | function | 在 Windows 与 POSIX 上为 FFmpeg `-lavfi` 滤镜选项转义文件路径，返回转义后字符串。 |
+| `vmaf_json_log_suffix` | function | 为 `libvmaf` 格式化可选的 `:log_fmt=json:log_path=...` 后缀，返回后缀或空串。 |
+| `parse_vmaf_json_frames` | function | 使用标准库扫描 `libvmaf` JSON 日志中的 `(frameNum, vmaf)` 逐帧分数，返回列表。 |
+| `summarize_frame_scores` | function | 从逐帧 VMAF 分数计算算术平均、调和平均、P05、最低分及最差帧索引。 |
+| `find_json_key_value_start` | function | 定位 JSON 对象成员在 `:` 后的值起始字节偏移，返回偏移或无。 |
+| `find_matching_brace` | function | 查找与左花括号 `{` 配对的右花括号 `}` 索引，返回位置或无。 |
+| `parse_frame_object` | function | 从单个 JSON 帧对象切片提取 `(frameNum, vmaf)`，返回元组或无。 |
+| `parse_json_number_for_key` | function | 在对象切片中解析指定键对应的有限 JSON 数值，返回浮点数或无。 |
+| `build_segmented_vmaf_args` | function | 构造对转换流直接关键帧跳转、对源流采用两段混合跳转与 `trim` 对齐的分段 `libvmaf` 参数（可选启用 HDR v1 与 JSON 日志），返回参数列表。 |
 | `build_xpsnr_args` | function | 构造使用快速 CPU `xpsnr` 滤镜（含 10 位竖屏 `transpose=1` 防护与分段混合对齐）的比对参数，返回参数列表。 |
 | `parse_xpsnr_score` | function | 从 FFmpeg 输出解析加权 XPSNR 分贝值并换算到 0–10000 标度，返回百分之一分或无。 |
 | `xpsnr_score_from_output` | function | 读取已完成的 XPSNR 运行输出，返回 `VmafScore` 包装或失败消息。 |
 | `extract_xpsnr_channel` | function | 从输出汇总行中解析单个指定 XPSNR 通道（`y`、`u` 或 `v`），返回分贝值或无。 |
 | `xpsnr_db_to_vmaf_hundredths` | function | 把加权 XPSNR 分贝值映射到 VMAF 百分之一标度，返回受限整数分数。 |
 | `score_from_output` | function | 把 `libvmaf` 输出文本解析为 `VmafScore`，返回分数或错误消息。 |
-| `next_quality_with_guess` | function | 从估算设置热启动二分画质搜索并向目标步进，返回下一设定值，已收敛时返回无。 |
+| `vmaf_logit` | function | 把以百分之一为单位的 VMAF 分数映射到 logit 空间使 CRF/QP S 形曲线近似线性，返回对数几率。 |
+| `logit_secant_extrapolate` | function | 在单边区间外基于 logit 空间割线斜率外推下一候选值，返回外推值或无。 |
+| `next_quality_with_guess` | function | 从估算设置热启动并通过 logit 空间割线插值向目标步进，返回下一设定值，已收敛时返回无。 |

@@ -79,7 +79,40 @@ pub(crate) fn sample_offsets(duration_seconds: f64, plan: SamplePlan) -> Vec<f64
         .collect()
 }
 
-// AI-FUNC-SUMMARY: Picks the next quality value to try from the results so far, optionally starting at an initial estimate; returns the value, or none when the search has converged; side effects: none.
+// AI-FUNC-SUMMARY: Maps a VMAF score in hundredths into logit space so S-curve quality trials behave nearly linearly; returns log-odds; side effects: none.
+fn vmaf_logit(hundredths: u32) -> f64 {
+    let p = (f64::from(hundredths) / 10_000.0).clamp(0.005, 0.9995);
+    (p / (1.0 - p)).ln()
+}
+
+// AI-FUNC-SUMMARY: Extrapolates the next candidate outside a one-sided bracket using logit-space secant slope when at least two points exist; returns extrapolated value or none when monotonic slope is unavailable; side effects: none.
+fn logit_secant_extrapolate(tried: &[(f64, u32)], target: u32, high_end: bool) -> Option<f64> {
+    if tried.len() < 2 {
+        return None;
+    }
+    let mut sorted = tried.to_vec();
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let ((x1, s1), (x2, s2)) = if high_end {
+        (sorted[sorted.len() - 2], sorted[sorted.len() - 1])
+    } else {
+        (sorted[0], sorted[1])
+    };
+    let dx = x2 - x1;
+    if dx.abs() < 1e-9 {
+        return None;
+    }
+    let y1 = vmaf_logit(s1);
+    let y2 = vmaf_logit(s2);
+    let slope = (y2 - y1) / dx;
+    if slope >= -1e-6 {
+        return None;
+    }
+    let (anchor_x, anchor_y) = if high_end { (x2, y2) } else { (x1, y1) };
+    let extrapolated = anchor_x + (vmaf_logit(target) - anchor_y) / slope;
+    extrapolated.is_finite().then_some(extrapolated)
+}
+
+// AI-FUNC-SUMMARY: Picks the next quality value to try from the results so far using logit-space secant interpolation, optionally starting at an initial estimate; returns the value, or none when the search has converged; side effects: none.
 pub(crate) fn next_quality_with_guess(
     tried: &[(f64, u32)],
     target: u32,
@@ -109,16 +142,19 @@ pub(crate) fn next_quality_with_guess(
     }
 
     let next = match (passing, failing) {
-        // A point on each side: interpolate between them by score.
+        // A point on each side: interpolate between them in logit space.
         (Some((pass_value, pass_score)), Some((fail_value, fail_score))) => {
             if (fail_value - pass_value).abs() <= range.step {
                 return None;
             }
-            let span = f64::from(pass_score) - f64::from(fail_score);
-            let fraction = if span.abs() < f64::EPSILON {
+            let y_pass = vmaf_logit(pass_score);
+            let y_fail = vmaf_logit(fail_score);
+            let y_target = vmaf_logit(target);
+            let span = y_pass - y_fail;
+            let fraction = if span.abs() < 1e-9 {
                 0.5
             } else {
-                ((f64::from(pass_score) - f64::from(target)) / span).clamp(0.05, 0.95)
+                ((y_pass - y_target) / span).clamp(0.05, 0.95)
             };
             pass_value + (fail_value - pass_value) * fraction
         }
@@ -127,24 +163,49 @@ pub(crate) fn next_quality_with_guess(
             if pass_value >= range.max - range.step {
                 return None;
             }
-            pass_value + (range.max - pass_value) * 0.5
+            let bisect = pass_value + (range.max - pass_value) * 0.5;
+            if let Some(extrap) = logit_secant_extrapolate(tried, target, true) {
+                let lo = (pass_value + range.step).min(range.max);
+                let hi = bisect.max(lo).min(range.max);
+                extrap.clamp(lo, hi)
+            } else {
+                bisect
+            }
         }
         // Nothing passed, so try a smaller value for better quality.
         (None, Some((fail_value, _))) => {
             if fail_value <= range.min + range.step {
                 return None;
             }
-            fail_value - (fail_value - range.min) * 0.5
+            let bisect = fail_value - (fail_value - range.min) * 0.5;
+            if let Some(extrap) = logit_secant_extrapolate(tried, target, false) {
+                let hi = (fail_value - range.step).max(range.min);
+                let lo = bisect.min(hi).max(range.min);
+                extrap.clamp(lo, hi)
+            } else {
+                bisect
+            }
         }
         (None, None) => midpoint(range),
     };
 
     let snapped = snap(next, range);
-    // Never repeat a setting that has already been measured.
-    if tried
-        .iter()
-        .any(|(value, _)| (value - snapped).abs() < range.step / 2.0)
-    {
+    // Never repeat a setting that has already been measured; if a wide bracket
+    // stalls at an endpoint due to rounding, fall back to its midpoint.
+    let already_tried = |candidate: f64| {
+        tried
+            .iter()
+            .any(|(value, _)| (value - candidate).abs() < range.step / 2.0)
+    };
+    if already_tried(snapped) {
+        if let (Some((pass_value, _)), Some((fail_value, _))) = (passing, failing)
+            && (fail_value - pass_value).abs() > range.step
+        {
+            let mid = snap((pass_value + fail_value) * 0.5, range);
+            if !already_tried(mid) {
+                return Some(mid);
+            }
+        }
         return None;
     }
     Some(snapped)
@@ -394,7 +455,16 @@ pub(crate) fn measure_trial(trial: Trial<'_>, run: StreamedRunner<'_>) -> Result
         // Trials stay on the processor: a sample is twelve seconds, and creating
         // a decoding device costs more than software decoding that much video,
         // up to thirty-six times per file.
-        let args = vmaf::build_vmaf_args(&encoded, sample, video, options, true, (None, None));
+        let args = vmaf::build_vmaf_args(
+            &encoded,
+            sample,
+            video,
+            options,
+            true,
+            (None, None),
+            false,
+            None,
+        );
         let measurement = run(
             &args,
             StreamedRun {
@@ -692,5 +762,54 @@ mod tests {
 
         // Even a tiny source produces a usable ladder.
         assert!(hardware_bitrate_ladder(1000).iter().all(|v| *v >= 100.0));
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies logit transformation stays finite and strictly increasing across VMAF scores; returns nothing; side effects: none.
+    fn logit_transform_is_monotonic() {
+        let low = vmaf_logit(0);
+        let mid = vmaf_logit(8000);
+        let target = vmaf_logit(9500);
+        let high = vmaf_logit(9900);
+        let ceil = vmaf_logit(10000);
+        for val in [low, mid, target, high, ceil] {
+            assert!(val.is_finite());
+        }
+        assert!(low < mid && mid < target && target < high && high < ceil);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies logit-space secant interpolation converges quickly on a realistic logistic VMAF curve without repeating candidates; returns nothing; side effects: none.
+    fn converges_on_logistic_curve_in_logit_space() {
+        let range = crf_range();
+        let target = 9500;
+        let sim_score = |crf: f64| -> u32 {
+            let vmaf = 100.0 / (1.0 + (0.28 * (crf - 42.0)).exp());
+            (vmaf * 100.0).round() as u32
+        };
+
+        let mut tried: Vec<(f64, u32)> = Vec::new();
+        for _ in 0..MAX_ITERATIONS {
+            let Some(next) = next_quality_with_guess(&tried, target, range, None) else {
+                break;
+            };
+            assert!(
+                !tried
+                    .iter()
+                    .any(|(value, _)| (*value - next).abs() < range.step / 2.0),
+                "search repeated {next}"
+            );
+            tried.push((next, sim_score(next)));
+        }
+
+        assert!(
+            tried.len() <= 5,
+            "expected rapid logit convergence, took {} trials: {tried:?}",
+            tried.len()
+        );
+        let (chosen, score, reached) = best_quality(&tried, target).unwrap();
+        assert!(reached);
+        assert!(score >= target);
+        assert!((chosen - 31.0).abs() < 1e-6);
     }
 }

@@ -15,9 +15,9 @@ readers in [../options.md](../options.md) and [../encoders.md](../encoders.md).
 | `search_quality_for` | function | Tunes the quality setting for one file by encoding and measuring short samples.. |
 | `plan_deviations` | function | Lists the recoverable differences one encode plan introduces, returning a kind and sentence for each. |
 | `pixel_format_deviation` | function | Describes a pixel-format conversion as a recoverable difference, returning the `pixel_format` kind and a reader-facing sentence. |
-| `assess_quality` | function | Measures a finished conversion and decides whether it needs a human decision, returning the outcome. |
-| `measure_quality_with_progress` | function | Evaluates output quality using the configured metric (`vmaf`, `xpsnr`, or `auto`) and check depth while updating progress UI. |
-| `measure_with_metric` | function | Runs either VMAF (`segmented`/`sampled`/`full`) or XPSNR measurement against the source stream, returning a quality measurement result. |
+| `assess_quality` | function | Measures a finished conversion (including JND local-collapse review gating) and decides whether it needs a human decision, returning the outcome. |
+| `measure_quality_with_progress` | function | Evaluates output quality using Dual-Pool packet stratification or keyframe-aligned segments across `vmaf`, `xpsnr`, or `auto` while updating progress UI. |
+| `measure_with_metric` | function | Runs segmented or whole-file VMAF (with per-frame JSON pooling) or XPSNR measurement against the source stream, returning a quality measurement result. |
 | `finish_conversion` | function | Commits a finished conversion, either replacing the original or keeping both for review, returning the conversion sizes or a terminal error. |
 | `commit_for_review` | function | Moves a finished conversion beside its untouched original and records why it needs a decision, returning the conversion sizes or a terminal error. |
 | `execute_transcode_attempt` | function | Executes one exact or explicitly adapted encoder attempt without committing it, returning success or classified failure. |

@@ -61,6 +61,7 @@ readers in [../architecture.md](../architecture.md).
 | `new` | function | Constructs the progress UI state, returning a new instance. |
 | `set_codec` | function | Records the codec this run produces, returning none. |
 | `set_quality_available` | function | Records whether quality can be measured in this run, returning none. |
+| `set_vmaf_hdr_v1_available` | function | Records whether HDR VMAF v1 models are available in this FFmpeg build, returning none. |
 | `emit_quality_measured` | function | Reports a finished quality measurement, returning none. |
 | `emit_quality_search` | function | Reports one step of a quality search, returning none. |
 | `emit_review_pending` | function | Reports that a conversion is waiting for a keep-or-discard decision, returning none. |

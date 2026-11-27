@@ -1,5 +1,9 @@
 # Version history
 
+## 0.5.0 — P1 quality engine: Dual-Pool sampling, logit search, per-frame pooling and HDR VMAF v1
+
+Upgraded quality measurement and tuning search across the Rust core without new dependencies: added zero-decode `ffprobe` packet scanning and isolated Dual-Pool segmented spot-checking (Pool A complexity-stratified mean/harmonic mean + Pool B starvation/spike risk probes for P05/Min), per-frame `libvmaf` JSON log parsing for Harmonic Mean, P05, Min, and exact `worst_frame_seconds` review timestamps, a JND-based local-collapse review gate (`harmonic mean < threshold - 3` or `P05 < threshold - 6`), `logit(VMAF/100)` secant interpolation in CRF/QP tuning search, dynamic detection and routing of PQ (`smpte2084`) HDR sources to `hdr_vmaf_v1.1.8` models when supported by FFmpeg, and updated Android's `libvmaf` build to `v3.2.1`. CLI `0.5.0` and GUI `0.5.0+19`.
+
 ## 0.4.2 — Progress that says what it is doing, and a timed details log
 
 The file bar no longer stops near 98% with a time left that never changes while the commit copies

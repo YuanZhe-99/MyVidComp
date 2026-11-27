@@ -61,6 +61,7 @@
 | `new` | function | 构造进度界面状态，返回一个新实例。 |
 | `set_codec` | function | 记录本次运行产出的编码，无返回值。 |
 | `set_quality_available` | function | 记录本次运行能否测量画质，无返回值。 |
+| `set_vmaf_hdr_v1_available` | function | 记录当前 FFmpeg 构建是否支持 HDR VMAF v1 模型，无返回值。 |
 | `emit_quality_measured` | function | 报告一次完成的画质测量，无返回值。 |
 | `emit_quality_search` | function | 报告画质搜索的一步，无返回值。 |
 | `emit_review_pending` | function | 报告一次转换正在等待“留哪一份”的决定，无返回值。 |

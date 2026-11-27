@@ -12,7 +12,7 @@ packaged alongside it, so a fresh install converts videos without downloading an
 ## The media tools
 
 No published Android build of FFmpeg carries what this project needs, so the shipped binaries are
-built from source by `scripts/build-android-ffmpeg.sh`. It produces one FFmpeg with `libvmaf` for
+built from source by `scripts/build-android-ffmpeg.sh`. It produces one FFmpeg with `libvmaf` (v3.2.1+, adding ARM64 NEON integer motion acceleration) for
 quality measurement, `libx265`, `libsvtav1` and `libvvenc` for the three output codecs, `libdav1d`
 for fast AV1 decoding, and MediaCodec for the phone's own video hardware.
 

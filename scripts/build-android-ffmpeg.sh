@@ -53,7 +53,7 @@ BIN="$WORK/bin"
 
 # Pinned, so that rebuilding produces the same tools. Update deliberately.
 FFMPEG_VERSION="9.0.1"
-VMAF_VERSION="v3.2.0"
+VMAF_VERSION="v3.2.1"
 X265_VERSION="4.1"
 SVTAV1_VERSION="v3.1.2"
 VVENC_VERSION="v1.14.0"

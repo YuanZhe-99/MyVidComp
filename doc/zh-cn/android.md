@@ -10,9 +10,9 @@
 ## 视频工具
 
 已发布的 Android FFmpeg 构建中没有一个带齐本项目所需的部件，因此随包的二进制由
-`scripts/build-android-ffmpeg.sh` 从源码构建。它产出一份 FFmpeg，其中包含用于画质测量的 `libvmaf`，
-用于三种输出编码的 `libx265`、`libsvtav1` 和 `libvvenc`，用于快速 AV1 解码的 `libdav1d`，以及通往
-手机自身视频硬件的 MediaCodec。
+`scripts/build-android-ffmpeg.sh` 从源码构建。它产出一份 FFmpeg，其中包含用于画质测量的
+`libvmaf`（v3.2.1+，新增 ARM64 NEON 整数运动特征加速）、用于三种输出编码的 `libx265`、`libsvtav1`
+和 `libvvenc`，用于快速 AV1 解码的 `libdav1d`，以及通往手机自身视频硬件的 MediaCodec。
 
 该构建在 Linux 上运行，需要 clang、cmake、ninja、meson 和 make，以及一份 Android NDK sysroot。它
 不需要 NDK 自带的编译器：它使用宿主机的 clang，指向 NDK 的 sysroot 和运行时库。正因如此，它可以在

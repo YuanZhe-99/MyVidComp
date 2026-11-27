@@ -15,9 +15,9 @@
 | `search_quality_for` | function | 通过编码并测量若干短样本，为一个文件调定画质设置。 |
 | `plan_deviations` | function | 列出一个编码方案引入的可挽回差异，为每一项返回类别和一句说明。 |
 | `pixel_format_deviation` | function | 把像素格式转换描述为可挽回的差异，返回 `pixel_format` 类别和一句面向读者的说明。 |
-| `assess_quality` | function | 测量一次完成的转换，并判定它是否需要人来决定，返回该结果。 |
-| `measure_quality_with_progress` | function | 按配置的指标（`vmaf`、`xpsnr` 或 `auto`）与检测深度评估输出画质并同步更新进度界面。 |
-| `measure_with_metric` | function | 对源流运行 VMAF（`segmented`/`sampled`/`full`）或 XPSNR 测量，返回画质测量结果。 |
+| `assess_quality` | function | 测量一次完成的转换（含基于 JND 的局部崩塌复核门禁），并判定它是否需要人来决定，返回该结果。 |
+| `measure_quality_with_progress` | function | 按配置的指标（`vmaf`、`xpsnr` 或 `auto`）与双池/关键帧对齐分段计划评估输出画质并同步更新进度界面。 |
+| `measure_with_metric` | function | 对源流运行带逐帧 JSON 池化的 VMAF 或 XPSNR 测量，返回画质测量结果。 |
 | `finish_conversion` | function | 提交一次完成的转换，或替换原文件，或两份都留待复核，返回转换前后的体积或一条终止性错误。 |
 | `commit_for_review` | function | 把完成的转换放到未被触动的原文件旁边，并记录它为何需要决定，返回转换前后的体积或一条终止性错误。 |
 | `execute_transcode_attempt` | function | 执行一次精确或明确适配的编码器尝试但不提交，返回成功或分类过的失败。 |

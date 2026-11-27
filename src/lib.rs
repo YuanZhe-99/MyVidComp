@@ -1185,6 +1185,7 @@ fn run_workflow(
     ui.set_codec(options.target_codec);
     ui.set_quality_available(quality_available);
     ui.set_vmaf_available(vmaf_support.available);
+    ui.set_vmaf_hdr_v1_available(vmaf_support.hdr_v1_available);
     ui.set_xpsnr_available(xpsnr_available);
     if !vmaf_support.available
         && let Some(reason) = reason
@@ -4307,8 +4308,18 @@ fn assess_quality(
     match measured {
         Ok(measurement) => {
             let score = measurement.score;
-            let caveat = vmaf::accuracy_caveat(&item.video).map(str::to_string);
-            let passed = score.hundredths >= options.review_threshold();
+            let caveat = vmaf::accuracy_caveat_with_support(&item.video, ui.vmaf_hdr_v1_available)
+                .map(str::to_string);
+            let mean_passed = score.hundredths >= options.review_threshold();
+            let harmonic_floor = options.review_threshold().saturating_sub(300);
+            let p05_floor = options.review_threshold().saturating_sub(600);
+            let local_collapse = measurement
+                .harmonic_mean_hundredths
+                .is_some_and(|harmonic| harmonic < harmonic_floor)
+                || measurement
+                    .p05_hundredths
+                    .is_some_and(|p05| p05 < p05_floor);
+            let passed = mean_passed && !local_collapse;
             ui.emit_quality_measured(
                 score.hundredths,
                 score.subsample,
@@ -4316,7 +4327,7 @@ fn assess_quality(
                 passed,
                 caveat.clone(),
             );
-            if !passed {
+            if !mean_passed {
                 deviations.push((
                     "quality".to_string(),
                     format!(
@@ -4325,6 +4336,26 @@ fn assess_quality(
                         format_quality(options.quality_target)
                     ),
                 ));
+            } else if local_collapse {
+                let detail = match (
+                    measurement.harmonic_mean_hundredths,
+                    measurement.p05_hundredths,
+                    measurement.worst_frame_seconds,
+                ) {
+                    (Some(harm), Some(p05), Some(ts)) => format!(
+                        "Average score met {} ({}), but a local segment dropped sharply (harmonic {}, 5th percentile {}) near {ts:.1}s.",
+                        format_quality(options.quality_target),
+                        format_quality(score.hundredths),
+                        format_quality(harm),
+                        format_quality(p05),
+                    ),
+                    _ => format!(
+                        "Average score met {} ({}), but a local segment dropped noticeably below target.",
+                        format_quality(options.quality_target),
+                        format_quality(score.hundredths),
+                    ),
+                };
+                deviations.push(("local_quality".to_string(), detail));
             }
             ConversionOutcome {
                 score: Some(score.hundredths),
@@ -4349,8 +4380,8 @@ fn assess_quality(
 // Purpose: Measures a converted file against its source while reporting how far the comparison has got.
 // Inputs: Run options, the work item, the measurement settings and the progress UI.
 // Returns: The measurement (score + optional worst timestamp) or a user-facing error.
-// Side effects: Runs ffmpeg and emits progress events.
-// Notes: Supports segmented window spot-checking, VMAF, XPSNR, and Auto two-stage verification.
+// Side effects: Runs ffmpeg and ffprobe and emits progress events.
+// Notes: Prefers zero-decode Dual-Pool packet stratification for >=90s files, falling back to keyframe-aligned uniform windows, and supports VMAF, XPSNR, and Auto two-stage verification.
 fn measure_quality_with_progress(
     options: &RunOptions,
     item: &WorkItem,
@@ -4368,12 +4399,22 @@ fn measure_quality_with_progress(
         || (options.quality_check == QualityCheck::Off
             && options.preservation == Preservation::Flexible);
     let windows = use_segmented
-        .then(|| vmaf::segmented_plan(item.video.duration_seconds))
-        .flatten()
-        .map(|planned| {
-            let keyframes = vmaf::probe_keyframes(&options.ffprobe, &item.temp_path);
-            vmaf::align_windows_to_keyframes(&planned, &keyframes, item.video.duration_seconds)
-        });
+        .then(|| {
+            if item.video.duration_seconds >= 90.0 {
+                let src_pkts = vmaf::probe_packets(&options.ffprobe, &item.input_path);
+                let dist_pkts = vmaf::probe_packets(&options.ffprobe, &item.temp_path);
+                if let Some(dual) =
+                    vmaf::dual_pool_plan(&src_pkts, &dist_pkts, item.video.duration_seconds)
+                {
+                    return Some(dual);
+                }
+            }
+            vmaf::segmented_plan(item.video.duration_seconds).map(|planned| {
+                let keyframes = vmaf::probe_keyframes(&options.ffprobe, &item.temp_path);
+                vmaf::align_windows_to_keyframes(&planned, &keyframes, item.video.duration_seconds)
+            })
+        })
+        .flatten();
 
     let metric = match options.quality_metric {
         QualityMetric::Vmaf => QualityMetric::Vmaf,
@@ -4430,7 +4471,7 @@ fn measure_quality_with_progress(
     )
 }
 
-// AI-FUNC-SUMMARY: Executes segmented or full-file quality measurement for a chosen metric with hardware-decode fallback; returns QualityMeasurement or error; side effects: spawns ffmpeg.
+// AI-FUNC-SUMMARY: Executes segmented or full-file quality measurement for a chosen metric with per-frame JSON pooling and hardware-decode fallback; returns QualityMeasurement or error; side effects: spawns ffmpeg and writes temporary frame logs.
 #[allow(clippy::too_many_arguments)]
 fn measure_with_metric(
     options: &RunOptions,
@@ -4445,15 +4486,32 @@ fn measure_with_metric(
     let on_gpu = metric == QualityMetric::Vmaf
         && decoding.scores_on_gpu()
         && vmaf::can_score_on_gpu(&item.video);
+    let fps = if item.video.fps.is_finite() && item.video.fps > 0.0 {
+        item.video.fps
+    } else {
+        30.0
+    };
+    let hdr_v1_available = ui.vmaf_hdr_v1_available;
 
     let run_once = |accels: (Option<HwAccel>, Option<HwAccel>),
                     ui: &mut ProgressUi|
      -> Result<vmaf::QualityMeasurement, String> {
         if let Some(windows) = windows {
             let steps = windows.len();
-            let mut sum = 0u64;
+            let mut pool_a_frames: Vec<(usize, f64)> = Vec::new();
+            let mut pool_b_frames: Vec<(usize, f64)> = Vec::new();
+            let mut pool_a_sum = 0u64;
+            let mut pool_a_count = 0u64;
+            let mut all_sum = 0u64;
+            let mut all_count = 0u64;
             let mut worst: Option<(u32, f64)> = None;
+
             for (idx, window) in windows.iter().enumerate() {
+                let log_path = (metric == QualityMetric::Vmaf)
+                    .then(|| with_added_suffix(&item.temp_path, &format!(".vmaf-{idx}.json")));
+                if let Some(path) = log_path.as_deref() {
+                    let _ = fs::remove_file(path);
+                }
                 let args = if metric == QualityMetric::Xpsnr {
                     vmaf::build_xpsnr_args(
                         &item.temp_path,
@@ -4472,6 +4530,8 @@ fn measure_with_metric(
                         *window,
                         true,
                         accels,
+                        hdr_v1_available,
+                        log_path.as_deref(),
                     )
                 };
                 let run = run_ffmpeg_streaming(
@@ -4484,34 +4544,104 @@ fn measure_with_metric(
                         steps,
                     },
                     ui,
-                )?;
-                let score = if metric == QualityMetric::Xpsnr {
-                    vmaf::xpsnr_score_from_output(
-                        run.status.success(),
-                        &run.stderr,
-                        vmaf_options.subsample,
-                    )?
+                );
+                let json_text = log_path
+                    .as_deref()
+                    .and_then(|path| fs::read_to_string(path).ok());
+                if let Some(path) = log_path.as_deref() {
+                    let _ = fs::remove_file(path);
+                }
+                let run = run?;
+
+                let frames = json_text
+                    .as_deref()
+                    .map(vmaf::parse_vmaf_json_frames)
+                    .unwrap_or_default();
+                let frame_stats = if metric == QualityMetric::Vmaf {
+                    vmaf::summarize_frame_scores(&frames)
                 } else {
-                    vmaf::score_from_output(
-                        run.status.success(),
-                        &run.stderr,
-                        vmaf_options.subsample,
-                    )?
+                    None
                 };
-                sum += u64::from(score.hundredths);
-                let midpoint = window.start_seconds + window.duration_seconds / 2.0;
-                if worst.is_none_or(|(best_low, _)| score.hundredths < best_low) {
-                    worst = Some((score.hundredths, midpoint));
+
+                let window_score = if !run.status.success() {
+                    if metric == QualityMetric::Xpsnr {
+                        vmaf::xpsnr_score_from_output(false, &run.stderr, vmaf_options.subsample)?
+                    } else {
+                        vmaf::score_from_output(false, &run.stderr, vmaf_options.subsample)?
+                    }
+                } else if let Some(stats) = frame_stats {
+                    VmafScore {
+                        hundredths: stats.mean_hundredths,
+                        subsample: vmaf_options.subsample,
+                    }
+                } else if metric == QualityMetric::Xpsnr {
+                    vmaf::xpsnr_score_from_output(true, &run.stderr, vmaf_options.subsample)?
+                } else {
+                    vmaf::score_from_output(true, &run.stderr, vmaf_options.subsample)?
+                };
+
+                if !frames.is_empty() {
+                    match window.pool {
+                        vmaf::SegmentPool::Stratified => pool_a_frames.extend(frames),
+                        vmaf::SegmentPool::Risk => pool_b_frames.extend(frames),
+                    }
+                }
+
+                all_sum += u64::from(window_score.hundredths);
+                all_count += 1;
+                if window.pool == vmaf::SegmentPool::Stratified {
+                    pool_a_sum += u64::from(window_score.hundredths);
+                    pool_a_count += 1;
+                }
+
+                let (low_hundredths, ts) = if let Some(stats) = frame_stats {
+                    let exact = (window.start_seconds + stats.worst_frame_index as f64 / fps)
+                        .min(window.start_seconds + window.duration_seconds);
+                    (stats.min_hundredths, exact)
+                } else {
+                    (
+                        window_score.hundredths,
+                        window.start_seconds + window.duration_seconds / 2.0,
+                    )
+                };
+                if worst.is_none_or(|(best_low, _)| low_hundredths < best_low) {
+                    worst = Some((low_hundredths, ts));
                 }
             }
+
+            let pool_a_stats = vmaf::summarize_frame_scores(&pool_a_frames);
+            let risk_source = if pool_b_frames.is_empty() {
+                &pool_a_frames
+            } else {
+                &pool_b_frames
+            };
+            let risk_stats = vmaf::summarize_frame_scores(risk_source);
+            let hundredths = if let Some(stats) = pool_a_stats {
+                stats.mean_hundredths
+            } else if let Some(avg) = pool_a_sum.checked_div(pool_a_count) {
+                avg as u32
+            } else {
+                (all_sum / all_count.max(1)) as u32
+            };
+
             return Ok(vmaf::QualityMeasurement {
                 score: VmafScore {
-                    hundredths: (sum / steps as u64) as u32,
+                    hundredths,
                     subsample: vmaf_options.subsample,
                 },
                 worst_frame_seconds: worst.map(|(_, ts)| ts),
                 metric,
+                harmonic_mean_hundredths: pool_a_stats.map(|s| s.harmonic_mean_hundredths),
+                p05_hundredths: risk_stats.map(|s| s.p05_hundredths),
+                min_hundredths: risk_stats.map(|s| s.min_hundredths),
             });
+        }
+
+        let use_json =
+            metric == QualityMetric::Vmaf && !(on_gpu && accels.0.is_some() && accels.1.is_some());
+        let log_path = use_json.then(|| with_added_suffix(&item.temp_path, ".vmaf-full.json"));
+        if let Some(path) = log_path.as_deref() {
+            let _ = fs::remove_file(path);
         }
 
         let args = if metric == QualityMetric::Xpsnr {
@@ -4539,6 +4669,8 @@ fn measure_with_metric(
                 vmaf_options,
                 true,
                 accels,
+                hdr_v1_available,
+                log_path.as_deref(),
             )
         };
         let run = run_ffmpeg_streaming(
@@ -4546,20 +4678,50 @@ fn measure_with_metric(
             &args,
             StreamedRun::single(Phase::Measuring, item.video.duration_seconds),
             ui,
-        )?;
-        let score = if metric == QualityMetric::Xpsnr {
-            vmaf::xpsnr_score_from_output(
-                run.status.success(),
-                &run.stderr,
-                vmaf_options.subsample,
-            )?
+        );
+        let json_text = log_path
+            .as_deref()
+            .and_then(|path| fs::read_to_string(path).ok());
+        if let Some(path) = log_path.as_deref() {
+            let _ = fs::remove_file(path);
+        }
+        let run = run?;
+
+        let frame_stats = if use_json {
+            json_text
+                .as_deref()
+                .map(vmaf::parse_vmaf_json_frames)
+                .and_then(|frames| vmaf::summarize_frame_scores(&frames))
         } else {
-            vmaf::score_from_output(run.status.success(), &run.stderr, vmaf_options.subsample)?
+            None
         };
+
+        let score = if !run.status.success() {
+            if metric == QualityMetric::Xpsnr {
+                vmaf::xpsnr_score_from_output(false, &run.stderr, vmaf_options.subsample)?
+            } else {
+                vmaf::score_from_output(false, &run.stderr, vmaf_options.subsample)?
+            }
+        } else if metric == QualityMetric::Xpsnr {
+            vmaf::xpsnr_score_from_output(true, &run.stderr, vmaf_options.subsample)?
+        } else {
+            match vmaf::score_from_output(true, &run.stderr, vmaf_options.subsample) {
+                Ok(score) => score,
+                Err(_) if frame_stats.is_some() => VmafScore {
+                    hundredths: frame_stats.unwrap().mean_hundredths,
+                    subsample: vmaf_options.subsample,
+                },
+                Err(err) => return Err(err),
+            }
+        };
+
         Ok(vmaf::QualityMeasurement {
             score,
-            worst_frame_seconds: None,
+            worst_frame_seconds: frame_stats.map(|s| s.worst_frame_index as f64 / fps),
             metric,
+            harmonic_mean_hundredths: frame_stats.map(|s| s.harmonic_mean_hundredths),
+            p05_hundredths: frame_stats.map(|s| s.p05_hundredths),
+            min_hundredths: frame_stats.map(|s| s.min_hundredths),
         })
     };
 
@@ -6891,6 +7053,8 @@ struct ProgressUi<'a> {
     quality_available: bool,
     /// Whether `libvmaf` is available in this ffmpeg build.
     vmaf_available: bool,
+    /// Whether `hdr_vmaf_v1.1.8` HDR models are supported by this ffmpeg build.
+    vmaf_hdr_v1_available: bool,
     /// Whether `xpsnr` is available in this ffmpeg build.
     xpsnr_available: bool,
     /// The encoder and quality setting of the attempt in progress, kept
@@ -7017,6 +7181,7 @@ impl<'a> ProgressUi<'a> {
             codec: TargetCodec::Av1,
             quality_available: false,
             vmaf_available: false,
+            vmaf_hdr_v1_available: false,
             xpsnr_available: false,
             last_encoder: String::new(),
             last_quality: String::new(),
@@ -7040,6 +7205,11 @@ impl<'a> ProgressUi<'a> {
     // AI-FUNC-SUMMARY: Records whether libvmaf is available in this ffmpeg build; returns none; side effects: updates progress state.
     fn set_vmaf_available(&mut self, available: bool) {
         self.vmaf_available = available;
+    }
+
+    // AI-FUNC-SUMMARY: Records whether HDR VMAF v1 models are available in this ffmpeg build; returns none; side effects: updates progress state.
+    fn set_vmaf_hdr_v1_available(&mut self, available: bool) {
+        self.vmaf_hdr_v1_available = available;
     }
 
     // AI-FUNC-SUMMARY: Records whether xpsnr is available in this ffmpeg build; returns none; side effects: updates progress state.

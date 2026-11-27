@@ -42,26 +42,19 @@ Three things are done to every comparison:
   inputs receive `transpose=1` before `xpsnr` to avoid an upstream FFmpeg
   `vf_xpsnr` 10-bit portrait stride bug.
 
-For whole-file checks (`sampled` / `full`), the check runs once across the stream.
-For the default `segmented` check on files 60 seconds or longer, up to six
-6-second windows spaced evenly across the body of the video (`n_subsample=3`,
-odd subsampling to avoid hierarchical B-frame phase-locking) are snapped to the
-converted file's keyframes via `ffprobe`; the converted stream uses a fast `-ss`
-seek while the reference stream uses a two-stage hybrid seek (`-ss` 5 s earlier
-plus `trim=start=...:duration=...`) so cross-codec GOP differences never shift
-frames out of alignment.
+For whole-file checks (`sampled` / `full`), the check runs once across the stream (still collecting per-frame `libvmaf` JSON logs when CPU `libvmaf` runs).
+For the default `segmented` check on files 90 seconds or longer, a zero-decode `ffprobe` packet scan (`packet=pts_time,size,flags`) builds an isolated Dual-Pool plan of 6-second keyframe-snapped windows: up to 6 complexity-stratified windows in Pool A (sampling low, medium, and high source-bitrate tertiles) estimate unbiased Mean and Harmonic Mean, while up to 4 isolated Pool B risk probes target bitrate-starvation lows (`B_enc / B_src`) and source-bitrate spikes to catch P05 and Min collapses without skewing Pool A. Files between 60 and 90 seconds (or when packet headers are unavailable) fall back to up to 6 uniformly spaced, keyframe-aligned 6-second windows. Both paths use odd subsampling (`n_subsample=3`) to avoid hierarchical B-frame phase-locking, fast `-ss` on the distorted input, and two-stage hybrid seek (`-ss` 5 s earlier plus `trim`) on the reference input.
 
-The model is chosen by resolution: the 4K model above 1440p, the standard model
-below it.
+Per-frame `libvmaf` JSON output is parsed to compute arithmetic Mean, Harmonic Mean, 5th percentile (P05), Minimum, and the exact `worst_frame_seconds` timestamp from the lowest-scoring frame's index and source frame rate. Under flexible preservation, even when the global Mean passes the review threshold, a sharp local drop (`Harmonic Mean < threshold - 3` or `P05 < threshold - 6`) flags a `local_quality` deviation and holds the conversion for review.
+
+The model is chosen dynamically from resolution, HDR transfer, and build capabilities: when FFmpeg's `libvmaf` supports `hdr_vmaf_v1.1.8` (`libvmaf >= 3.2` with `-Denable_zimg=true`), PQ (`smpte2084`) sources automatically use `hdr_vmaf_v1.1.8_1d5h_2160` (> 1440p) or `hdr_vmaf_v1.1.8_3d0h` (<= 1440p). Otherwise, SDR and unsupported builds use `vmaf_4k_v0.6.1` above 1440p and `vmaf_v0.6.1` below it.
 
 `n_threads` defaults to one thread in FFmpeg itself, which is far too slow for
 whole files, so MyVidComp sets it to the number of cores unless told otherwise.
 
 ## Where it is inaccurate
 
-The published VMAF models were trained on standard-range video. HDR sources are
-still scored, but the result carries a note saying it is indicative only, and it
-should not be used to reject an HDR conversion on its own.
+Standard `vmaf_v0.6.1` models were trained on standard-range video. When an FFmpeg build supports `hdr_vmaf_v1.1.8`, PQ (`smpte2084`) HDR sources are scored natively without an HDR inaccuracy caveat; HLG (`arib-std-b67`) sources and builds without HDR VMAF v1 still carry a note saying the score is indicative only and should not be used to reject an HDR conversion on its own.
 
 ## Choosing a setting
 
@@ -76,9 +69,9 @@ minutes, twelve seconds each, at most six.
 
 Each trial encodes every sample at one setting and measures the result with
 `n_subsample=5` (odd subsampling avoids B-frame phase-locking while cutting trial
-scoring cost), then interpolates towards the setting that lands just above the
-target (seeded by an initial estimate when available). The search
-stops when the bracket closes to one step, when a setting repeats, or after
+scoring cost), then interpolates in `logit(VMAF/100)` secant space (seeded by an
+initial estimate when available) to linearize the CRF/QP S-curve towards the
+setting just above the target. The search stops when the bracket closes to one step, when a setting repeats, or after
 six trials. The chosen setting is the largest passing value, which is the
 smallest file that still reaches the target.
 

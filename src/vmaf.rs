@@ -14,12 +14,25 @@ use super::{
     pixel_format_bit_depth, process_command,
 };
 
-/// Result of a quality measurement, including an optional worst-quality timestamp.
+/// Which sampling pool a segmented quality window belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentPool {
+    /// Complexity-stratified sample representing global visual quality.
+    Stratified,
+    /// Targeted risk probe checking bitrate starvation or complexity spikes.
+    Risk,
+}
+
+/// Result of a quality measurement, including optional per-frame pooling statistics
+/// and a worst-quality timestamp.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QualityMeasurement {
     pub score: VmafScore,
     pub worst_frame_seconds: Option<f64>,
     pub metric: QualityMetric,
+    pub harmonic_mean_hundredths: Option<u32>,
+    pub p05_hundredths: Option<u32>,
+    pub min_hundredths: Option<u32>,
 }
 
 /// One short window for segmented quality checking.
@@ -27,6 +40,26 @@ pub struct QualityMeasurement {
 pub struct SegmentWindow {
     pub start_seconds: f64,
     pub duration_seconds: f64,
+    pub pool: SegmentPool,
+}
+
+/// Packet header sample extracted via ffprobe without decoding video frames.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PacketSample {
+    pub pts_seconds: f64,
+    pub size_bytes: u64,
+    pub is_keyframe: bool,
+}
+
+/// Per-frame VMAF summary metrics aggregated from libvmaf frame logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameStats {
+    pub mean_hundredths: u32,
+    pub harmonic_mean_hundredths: u32,
+    pub p05_hundredths: u32,
+    pub min_hundredths: u32,
+    pub worst_frame_index: usize,
+    pub frame_count: usize,
 }
 
 /// A measured quality score, kept in hundredths of a VMAF point so it can cross
@@ -71,9 +104,39 @@ impl Default for VmafOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VmafSupport {
     pub available: bool,
+    pub hdr_v1_available: bool,
 }
 
-// AI-FUNC-SUMMARY: Checks whether the FFmpeg build can measure quality; returns support with a reason when unavailable; side effects: runs ffmpeg once to list the filter.
+// AI-FUNC-SUMMARY: Checks whether the FFmpeg build supports Netflix HDR VMAF v1 models (`hdr_vmaf_v1.1.8_3d0h`); returns true when the synthetic filter probe succeeds; side effects: runs ffmpeg on a 1-frame synthetic source.
+pub fn detect_vmaf_hdr_v1_support(ffmpeg: &str) -> bool {
+    let output = process_command(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.04,format=yuv420p10le",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.04,format=yuv420p10le",
+            "-lavfi",
+            "[0:v][1:v]libvmaf=model=version=hdr_vmaf_v1.1.8_3d0h",
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    output.is_ok_and(|out| out.status.success())
+}
+
+// AI-FUNC-SUMMARY: Checks whether the FFmpeg build can measure quality (including HDR VMAF v1 support); returns support with a reason when unavailable; side effects: runs ffmpeg to inspect the filter.
 pub fn detect_vmaf_support(ffmpeg: &str) -> (VmafSupport, Option<String>) {
     let output = process_command(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-h", "filter=libvmaf"])
@@ -87,10 +150,20 @@ pub fn detect_vmaf_support(ffmpeg: &str) -> (VmafSupport, Option<String>) {
             let mut text = String::from_utf8_lossy(&output.stdout).to_string();
             text.push_str(&String::from_utf8_lossy(&output.stderr));
             if text.contains("libvmaf") && text.contains("n_subsample") {
-                (VmafSupport { available: true }, None)
+                let hdr_v1_available = detect_vmaf_hdr_v1_support(ffmpeg);
+                (
+                    VmafSupport {
+                        available: true,
+                        hdr_v1_available,
+                    },
+                    None,
+                )
             } else {
                 (
-                    VmafSupport { available: false },
+                    VmafSupport {
+                        available: false,
+                        hdr_v1_available: false,
+                    },
                     Some(
                         "this FFmpeg build has no libvmaf filter, so quality cannot be measured"
                             .to_string(),
@@ -99,7 +172,10 @@ pub fn detect_vmaf_support(ffmpeg: &str) -> (VmafSupport, Option<String>) {
             }
         }
         Err(err) => (
-            VmafSupport { available: false },
+            VmafSupport {
+                available: false,
+                hdr_v1_available: false,
+            },
             Some(format!(
                 "failed to ask ffmpeg about the libvmaf filter: {err}"
             )),
@@ -245,10 +321,295 @@ pub fn segmented_plan(duration_seconds: f64) -> Option<Vec<SegmentWindow>> {
             SegmentWindow {
                 start_seconds: usable_start + (usable_end - usable_start) * fraction,
                 duration_seconds: SEGMENT_WINDOW_SECONDS,
+                pool: SegmentPool::Stratified,
             }
         })
         .collect();
     Some(windows)
+}
+
+// AI-FUNC-SUMMARY: Parses `ffprobe` packet CSV lines (`pts_time,size,flags`) into packet header samples; returns valid non-negative samples in stream order; side effects: none.
+pub fn parse_packet_samples(text: &str) -> Vec<PacketSample> {
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.split(',');
+            let pts_seconds = parts.next()?.trim().parse::<f64>().ok()?;
+            if !pts_seconds.is_finite() || pts_seconds < 0.0 {
+                return None;
+            }
+            let size_bytes = parts.next()?.trim().parse::<u64>().ok()?;
+            let flags = parts.next().unwrap_or("").trim();
+            Some(PacketSample {
+                pts_seconds,
+                size_bytes,
+                is_keyframe: flags.starts_with('K'),
+            })
+        })
+        .collect()
+}
+
+// AI-FUNC-SUMMARY: Scans video packet headers using `ffprobe` without decoding frames; returns parsed packet samples or empty on failure; side effects: spawns ffprobe.
+pub fn probe_packets(ffprobe: &str, path: &Path) -> Vec<PacketSample> {
+    let output = process_command(ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,size,flags",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_packet_samples(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PacketBin {
+    start: f64,
+    src_bytes: u64,
+    dist_bytes: u64,
+    ratio: f64,
+}
+
+// AI-FUNC-SUMMARY: Builds an isolated Dual-Pool segmented plan (Pool A complexity-stratified + Pool B bitrate-starvation/spike risk probes) from zero-decode packet scans; returns snapped windows or none when short or insufficient; side effects: none.
+pub fn dual_pool_plan(
+    source_packets: &[PacketSample],
+    distorted_packets: &[PacketSample],
+    duration_seconds: f64,
+) -> Option<Vec<SegmentWindow>> {
+    if !duration_seconds.is_finite()
+        || duration_seconds < 90.0
+        || source_packets.is_empty()
+        || distorted_packets.is_empty()
+    {
+        return None;
+    }
+
+    let start_bound = duration_seconds * 0.05;
+    let end_bound = (duration_seconds * 0.95 - SEGMENT_WINDOW_SECONDS).max(start_bound);
+    if end_bound <= start_bound {
+        return None;
+    }
+
+    let num_bins = ((end_bound - start_bound) / SEGMENT_WINDOW_SECONDS).floor() as usize + 1;
+    let mut bins: Vec<PacketBin> = (0..num_bins)
+        .map(|idx| PacketBin {
+            start: start_bound + idx as f64 * SEGMENT_WINDOW_SECONDS,
+            src_bytes: 0,
+            dist_bytes: 0,
+            ratio: 0.0,
+        })
+        .collect();
+
+    let max_pts = start_bound + num_bins as f64 * SEGMENT_WINDOW_SECONDS;
+    for pkt in source_packets {
+        if pkt.pts_seconds >= start_bound && pkt.pts_seconds < max_pts {
+            let idx = ((pkt.pts_seconds - start_bound) / SEGMENT_WINDOW_SECONDS).floor() as usize;
+            if let Some(bin) = bins.get_mut(idx) {
+                bin.src_bytes = bin.src_bytes.saturating_add(pkt.size_bytes);
+            }
+        }
+    }
+    for pkt in distorted_packets {
+        if pkt.pts_seconds >= start_bound && pkt.pts_seconds < max_pts {
+            let idx = ((pkt.pts_seconds - start_bound) / SEGMENT_WINDOW_SECONDS).floor() as usize;
+            if let Some(bin) = bins.get_mut(idx) {
+                bin.dist_bytes = bin.dist_bytes.saturating_add(pkt.size_bytes);
+            }
+        }
+    }
+
+    let mut valid: Vec<PacketBin> = bins
+        .into_iter()
+        .filter(|b| b.src_bytes > 0 && b.dist_bytes > 0)
+        .map(|mut b| {
+            b.ratio = b.dist_bytes as f64 / b.src_bytes.max(1) as f64;
+            b
+        })
+        .collect();
+    if valid.len() < 6 {
+        return None;
+    }
+
+    let overlaps = |chosen: &[SegmentWindow], start: f64| {
+        chosen
+            .iter()
+            .any(|w| (w.start_seconds - start).abs() < SEGMENT_WINDOW_SECONDS - 1e-6)
+    };
+
+    let mut selected: Vec<SegmentWindow> = Vec::with_capacity(10);
+
+    // Pool A: complexity-stratified (up to 6 windows: 2 from each tertile of source bitrate).
+    valid.sort_by(|a, b| {
+        a.src_bytes
+            .cmp(&b.src_bytes)
+            .then_with(|| a.start.total_cmp(&b.start))
+    });
+    let len = valid.len();
+    let t1 = len / 3;
+    let t2 = (2 * len) / 3;
+    for slice in [&valid[0..t1], &valid[t1..t2], &valid[t2..len]] {
+        if slice.is_empty() {
+            continue;
+        }
+        let targets = [slice.len() / 3, (2 * slice.len()) / 3];
+        let mut picked = 0usize;
+        for &target_idx in &targets {
+            if picked >= 2 {
+                break;
+            }
+            // Probe target index first, then scan outward for a non-overlapping bin.
+            let mut candidate_order = Vec::with_capacity(slice.len());
+            candidate_order.push(target_idx.min(slice.len() - 1));
+            for delta in 1..slice.len() {
+                if let Some(right) = target_idx.checked_add(delta)
+                    && right < slice.len()
+                {
+                    candidate_order.push(right);
+                }
+                if let Some(left) = target_idx.checked_sub(delta) {
+                    candidate_order.push(left);
+                }
+            }
+            for idx in candidate_order {
+                let bin = slice[idx];
+                if !overlaps(&selected, bin.start) {
+                    selected.push(SegmentWindow {
+                        start_seconds: bin.start,
+                        duration_seconds: SEGMENT_WINDOW_SECONDS,
+                        pool: SegmentPool::Stratified,
+                    });
+                    picked += 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Pool B: risk probes (up to 2 bitrate-starvation lows + up to 2 source-complexity spikes).
+    let mut by_ratio = valid.clone();
+    by_ratio.sort_by(|a, b| {
+        a.ratio
+            .total_cmp(&b.ratio)
+            .then_with(|| a.start.total_cmp(&b.start))
+    });
+    let mut starvation_picked = 0usize;
+    for bin in by_ratio {
+        if starvation_picked >= 2 {
+            break;
+        }
+        if !overlaps(&selected, bin.start) {
+            selected.push(SegmentWindow {
+                start_seconds: bin.start,
+                duration_seconds: SEGMENT_WINDOW_SECONDS,
+                pool: SegmentPool::Risk,
+            });
+            starvation_picked += 1;
+        }
+    }
+
+    let mut by_spike = valid;
+    by_spike.sort_by(|a, b| {
+        b.src_bytes
+            .cmp(&a.src_bytes)
+            .then_with(|| a.start.total_cmp(&b.start))
+    });
+    let mut spike_picked = 0usize;
+    for bin in by_spike {
+        if spike_picked >= 2 {
+            break;
+        }
+        if !overlaps(&selected, bin.start) {
+            selected.push(SegmentWindow {
+                start_seconds: bin.start,
+                duration_seconds: SEGMENT_WINDOW_SECONDS,
+                pool: SegmentPool::Risk,
+            });
+            spike_picked += 1;
+        }
+    }
+
+    // Snap all selected windows onto the distorted stream's keyframes while
+    // preserving pool identity and prioritizing Pool A over Pool B on collisions.
+    let mut keyframes: Vec<f64> = distorted_packets
+        .iter()
+        .filter(|p| p.is_keyframe && p.pts_seconds.is_finite() && p.pts_seconds >= 0.0)
+        .map(|p| p.pts_seconds)
+        .collect();
+    keyframes.sort_by(|a, b| a.total_cmp(b));
+    keyframes.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+
+    let mut snapped: Vec<SegmentWindow> = selected
+        .into_iter()
+        .map(|window| {
+            let start_seconds = snap_to_keyframe(window, &keyframes, duration_seconds);
+            SegmentWindow {
+                start_seconds,
+                duration_seconds: window.duration_seconds,
+                pool: window.pool,
+            }
+        })
+        .collect();
+
+    snapped.sort_by(|a, b| a.start_seconds.total_cmp(&b.start_seconds));
+    let mut final_windows: Vec<SegmentWindow> = Vec::with_capacity(snapped.len());
+    for window in snapped {
+        if let Some(prev) = final_windows.last_mut()
+            && (window.start_seconds - prev.start_seconds).abs() < 1.0
+        {
+            if prev.pool == SegmentPool::Risk && window.pool == SegmentPool::Stratified {
+                *prev = window;
+            }
+            continue;
+        }
+        final_windows.push(window);
+    }
+
+    if final_windows
+        .iter()
+        .any(|w| w.pool == SegmentPool::Stratified)
+    {
+        Some(final_windows)
+    } else {
+        None
+    }
+}
+
+// AI-FUNC-SUMMARY: Snaps one segment window onto the nearest distorted keyframe within bounds; returns the snapped start time in seconds; side effects: none.
+fn snap_to_keyframe(window: SegmentWindow, keyframes: &[f64], duration_seconds: f64) -> f64 {
+    if keyframes.is_empty() {
+        return window.start_seconds;
+    }
+    keyframes
+        .iter()
+        .copied()
+        .filter(|&k| k + window.duration_seconds <= duration_seconds + 0.5)
+        .min_by(|a, b| {
+            (a - window.start_seconds)
+                .abs()
+                .total_cmp(&(b - window.start_seconds).abs())
+        })
+        .or_else(|| {
+            keyframes
+                .iter()
+                .copied()
+                .filter(|&k| k <= window.start_seconds)
+                .max_by(|a, b| a.total_cmp(b))
+        })
+        .unwrap_or(window.start_seconds)
 }
 
 // AI-FUNC-SUMMARY: Parses keyframe timestamps from ffprobe CSV output; returns sorted unique non-negative timestamps; side effects: none.
@@ -335,6 +696,7 @@ pub fn align_windows_to_keyframes(
         aligned.push(SegmentWindow {
             start_seconds: snapped,
             duration_seconds: window.duration_seconds,
+            pool: window.pool,
         });
     }
 
@@ -345,7 +707,213 @@ pub fn align_windows_to_keyframes(
     }
 }
 
+// AI-FUNC-SUMMARY: Escapes a file path so FFmpeg `-lavfi` accepts it as a filter option value on Windows and POSIX; returns escaped path string; side effects: none.
+pub fn escape_filter_path(path: &Path) -> String {
+    let raw = path.to_string_lossy().replace('\\', "/");
+    let mut out = String::with_capacity(raw.len() + 8);
+    for ch in raw.chars() {
+        match ch {
+            ':' | '\'' | ',' | ';' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+// AI-FUNC-SUMMARY: Formats optional `log_fmt=json:log_path=...` suffix for `libvmaf`; returns suffix or empty string; side effects: none.
+fn vmaf_json_log_suffix(log_path: Option<&Path>) -> String {
+    match log_path {
+        Some(path) => format!(":log_fmt=json:log_path={}", escape_filter_path(path)),
+        None => String::new(),
+    }
+}
+
+// AI-FUNC-SUMMARY: Parses per-frame `(frameNum, vmaf)` scores out of a libvmaf JSON log without external dependencies; returns sorted-by-appearance pairs; side effects: none.
+pub fn parse_vmaf_json_frames(json: &str) -> Vec<(usize, f64)> {
+    let Some(frames_key) = find_json_key_value_start(json, "frames") else {
+        return Vec::new();
+    };
+    let rest = json[frames_key..].trim_start();
+    let Some(arr_body) = rest.strip_prefix('[') else {
+        return Vec::new();
+    };
+
+    let mut results = Vec::new();
+    let bytes = arr_body.as_bytes();
+    let mut i = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+
+    while i < bytes.len() {
+        let ch = bytes[i];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if ch == b'\\' {
+                escape = true;
+            } else if ch == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        match ch {
+            b'"' => in_string = true,
+            b']' => break,
+            b'{' => {
+                let obj_start = i;
+                let Some(obj_end) = find_matching_brace(arr_body, obj_start) else {
+                    break;
+                };
+                let frame_obj = &arr_body[obj_start..=obj_end];
+                if let Some(pair) = parse_frame_object(frame_obj) {
+                    results.push(pair);
+                }
+                i = obj_end + 1;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    results
+}
+
+// AI-FUNC-SUMMARY: Computes arithmetic mean, harmonic mean, P05, min, and worst frame index from per-frame VMAF scores; returns stats or none when empty; side effects: none.
+pub fn summarize_frame_scores(frames: &[(usize, f64)]) -> Option<FrameStats> {
+    let valid: Vec<(usize, f64)> = frames
+        .iter()
+        .copied()
+        .filter(|&(_, score)| score.is_finite())
+        .map(|(idx, score)| (idx, score.clamp(0.0, 100.0)))
+        .collect();
+    if valid.is_empty() {
+        return None;
+    }
+
+    let count = valid.len();
+    let mut sum = 0.0_f64;
+    let mut recip_sum = 0.0_f64;
+    let mut worst = valid[0];
+    let mut sorted = Vec::with_capacity(count);
+
+    for &(frame_idx, score) in &valid {
+        sum += score;
+        recip_sum += 1.0 / score.max(1.0);
+        sorted.push(score);
+        if score < worst.1 {
+            worst = (frame_idx, score);
+        }
+    }
+
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let p05_idx = ((0.05 * (count - 1) as f64).floor() as usize).min(count - 1);
+    let mean = sum / count as f64;
+    let harmonic = count as f64 / recip_sum;
+
+    let to_hundredths = |val: f64| (val * 100.0).round().clamp(0.0, 10_000.0) as u32;
+
+    Some(FrameStats {
+        mean_hundredths: to_hundredths(mean),
+        harmonic_mean_hundredths: to_hundredths(harmonic),
+        p05_hundredths: to_hundredths(sorted[p05_idx]),
+        min_hundredths: to_hundredths(sorted[0]),
+        worst_frame_index: worst.0,
+        frame_count: count,
+    })
+}
+
+// AI-FUNC-SUMMARY: Locates the start byte offset of a JSON object member's value after `:`; returns offset or none; side effects: none.
+fn find_json_key_value_start(text: &str, key: &str) -> Option<usize> {
+    let needle = format!("\"{key}\"");
+    let mut search_from = 0usize;
+    while let Some(rel) = text[search_from..].find(&needle) {
+        let after_key = search_from + rel + needle.len();
+        let trimmed = text[after_key..].trim_start();
+        if let Some(after_colon) = trimmed.strip_prefix(':') {
+            let offset = text.len() - after_colon.len();
+            return Some(offset);
+        }
+        search_from = after_key;
+    }
+    None
+}
+
+// AI-FUNC-SUMMARY: Finds the closing `}` byte index matching an opening `{`; returns index or none; side effects: none.
+fn find_matching_brace(text: &str, open_idx: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (idx, &b) in bytes.iter().enumerate().skip(open_idx) {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+// AI-FUNC-SUMMARY: Extracts `(frameNum, vmaf)` from one JSON frame object slice; returns pair or none; side effects: none.
+fn parse_frame_object(frame_obj: &str) -> Option<(usize, f64)> {
+    let frame_num_pos = find_json_key_value_start(frame_obj, "frameNum")?;
+    let frame_num_str: String = frame_obj[frame_num_pos..]
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let frame_num = frame_num_str.parse::<usize>().ok()?;
+
+    let metrics_start = find_json_key_value_start(frame_obj, "metrics")?;
+    let metrics_rel = frame_obj[metrics_start..].find('{')?;
+    let metrics_open = metrics_start + metrics_rel;
+    let metrics_close = find_matching_brace(frame_obj, metrics_open)?;
+    let metrics_obj = &frame_obj[metrics_open..=metrics_close];
+
+    for key in ["vmaf", "vmaf_v1", "hdr_vmaf"] {
+        if let Some(score) = parse_json_number_for_key(metrics_obj, key) {
+            return Some((frame_num, score));
+        }
+    }
+    None
+}
+
+// AI-FUNC-SUMMARY: Parses a finite JSON numeric value for a given key inside an object slice; returns float or none; side effects: none.
+fn parse_json_number_for_key(obj: &str, key: &str) -> Option<f64> {
+    let pos = find_json_key_value_start(obj, key)?;
+    let token: String = obj[pos..]
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E'))
+        .collect();
+    if token.is_empty() {
+        return None;
+    }
+    token.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
 // AI-FUNC-SUMMARY: Builds ffmpeg arguments for one seeked segmented VMAF window using keyframe seek on distorted input and hybrid seek+trim on reference input; returns the argument list; side effects: none.
+#[allow(clippy::too_many_arguments)]
 pub fn build_segmented_vmaf_args(
     distorted: &Path,
     reference: &Path,
@@ -354,9 +922,11 @@ pub fn build_segmented_vmaf_args(
     window: SegmentWindow,
     progress: bool,
     accel: (Option<HwAccel>, Option<HwAccel>),
+    hdr_v1_available: bool,
+    log_path: Option<&Path>,
 ) -> Vec<String> {
     let format = comparison_pixel_format(video);
-    let model = model_for(video);
+    let model = model_for_with_support(video, hdr_v1_available);
     let threads = if options.threads == 0 {
         std::thread::available_parallelism()
             .map(|value| value.get() as u32)
@@ -369,11 +939,12 @@ pub fn build_segmented_vmaf_args(
     let ref_coarse = (window.start_seconds - lead).max(0.0);
     let ref_trim_start = (window.start_seconds - ref_coarse).max(0.0);
     let duration = format!("{:.3}", window.duration_seconds);
+    let log_suffix = vmaf_json_log_suffix(log_path);
 
     let filter = format!(
         "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[dist];\
          [1:v:0]trim=start={ref_trim_start:.3}:duration={duration},settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
-         [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest"
+         [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest{log_suffix}"
     );
 
     let mut args = vec![
@@ -604,6 +1175,39 @@ pub fn model_for(video: &VideoInfo) -> &'static str {
     }
 }
 
+// AI-FUNC-SUMMARY: Chooses the VMAF model matching resolution and HDR transfer capability, routing PQ (`smpte2084`) sources to `hdr_vmaf_v1.1.8` when available; returns the built-in model name; side effects: none.
+pub fn model_for_with_support(video: &VideoInfo, hdr_v1_available: bool) -> &'static str {
+    let is_pq = video
+        .color_transfer
+        .as_deref()
+        .is_some_and(|t| t.eq_ignore_ascii_case("smpte2084"));
+    if hdr_v1_available && is_pq {
+        if video.width.max(video.height) > 2560 || video.height > 1440 {
+            "hdr_vmaf_v1.1.8_1d5h_2160"
+        } else {
+            "hdr_vmaf_v1.1.8_3d0h"
+        }
+    } else {
+        model_for(video)
+    }
+}
+
+// AI-FUNC-SUMMARY: Reports whether HDR accuracy is handled natively or warrants a caveat sentence based on libvmaf capabilities; returns caveat or none; side effects: none.
+pub fn accuracy_caveat_with_support(
+    video: &VideoInfo,
+    hdr_v1_available: bool,
+) -> Option<&'static str> {
+    let is_pq = video
+        .color_transfer
+        .as_deref()
+        .is_some_and(|t| t.eq_ignore_ascii_case("smpte2084"));
+    if hdr_v1_available && is_pq {
+        None
+    } else {
+        accuracy_caveat(video)
+    }
+}
+
 // AI-FUNC-SUMMARY: Chooses a pixel format both comparison inputs can be converted to; returns a planar YUV format libvmaf accepts; side effects: none.
 pub fn comparison_pixel_format(video: &VideoInfo) -> &'static str {
     // libvmaf only accepts planar YUV at 8, 10, 12 or 16 bits. Anything else,
@@ -636,6 +1240,7 @@ pub fn comparison_pixel_format(video: &VideoInfo) -> &'static str {
 }
 
 // AI-FUNC-SUMMARY: Builds the ffmpeg arguments that compare a converted file against its source; returns the argument list; side effects: none.
+#[allow(clippy::too_many_arguments)]
 pub fn build_vmaf_args(
     distorted: &Path,
     reference: &Path,
@@ -646,9 +1251,11 @@ pub fn build_vmaf_args(
     // converted one is in the target codec, and hardware that decodes the
     // source may refuse what was just produced from it.
     accel: (Option<HwAccel>, Option<HwAccel>),
+    hdr_v1_available: bool,
+    log_path: Option<&Path>,
 ) -> Vec<String> {
     let format = comparison_pixel_format(video);
-    let model = model_for(video);
+    let model = model_for_with_support(video, hdr_v1_available);
     let threads = if options.threads == 0 {
         std::thread::available_parallelism()
             .map(|value| value.get() as u32)
@@ -657,6 +1264,7 @@ pub fn build_vmaf_args(
         options.threads
     };
     let subsample = options.subsample.max(1);
+    let log_suffix = vmaf_json_log_suffix(log_path);
 
     // Input 0 is the distorted video and input 1 the reference; the filter is
     // documented that way round and silently reports a different number if the
@@ -665,7 +1273,7 @@ pub fn build_vmaf_args(
     let filter = format!(
         "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[dist];\
          [1:v:0]settb=AVTB,setpts=PTS-STARTPTS,format={format}[ref];\
-         [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest"
+         [dist][ref]libvmaf=model=version={model}:n_threads={threads}:n_subsample={subsample}:shortest=1:ts_sync_mode=nearest{log_suffix}"
     );
 
     let mut args = vec![
@@ -825,6 +1433,8 @@ mod tests {
             },
             false,
             (None, None),
+            false,
+            None,
         );
 
         let joined = args.join(" ");
@@ -855,6 +1465,8 @@ mod tests {
             VmafOptions::default(),
             true,
             (None, None),
+            false,
+            None,
         );
 
         let joined = args.join(" ");
@@ -894,6 +1506,8 @@ mod tests {
             VmafOptions::default(),
             false,
             (None, Some(HwAccel::D3d11va)),
+            false,
+            None,
         );
 
         let joined = args.join(" ");
@@ -916,6 +1530,8 @@ mod tests {
             VmafOptions::default(),
             false,
             (Some(HwAccel::Cuda), Some(HwAccel::Cuda)),
+            false,
+            None,
         );
         assert_eq!(both.iter().filter(|arg| *arg == "-hwaccel").count(), 2);
     }
@@ -966,6 +1582,8 @@ mod tests {
                 VmafOptions::default(),
                 false,
                 accel,
+                false,
+                None,
             );
             let index = args.iter().position(|arg| arg == "-lavfi").unwrap();
             args[index + 1].clone()
@@ -1042,6 +1660,7 @@ mod tests {
         let win = SegmentWindow {
             start_seconds: 120.0,
             duration_seconds: 6.0,
+            pool: SegmentPool::Stratified,
         };
         let vmaf_args = build_segmented_vmaf_args(
             Path::new("/tmp/out.mp4"),
@@ -1054,6 +1673,8 @@ mod tests {
             win,
             false,
             (None, None),
+            false,
+            Some(Path::new("C:\\tmp\\vmaf.json")),
         );
         let vmaf_joined = vmaf_args.join(" ");
         assert_eq!(vmaf_args.iter().filter(|a| *a == "-ss").count(), 2);
@@ -1062,6 +1683,7 @@ mod tests {
         assert!(vmaf_joined.contains("-ss 115.000 -t 12.000 -i /videos/in.mp4"));
         assert!(vmaf_joined.contains("trim=start=5.000:duration=6.000"));
         assert!(vmaf_joined.contains("n_subsample=3"));
+        assert!(vmaf_joined.contains(":log_fmt=json:log_path=C\\:/tmp/vmaf.json"));
 
         let xpsnr_args = build_xpsnr_args(
             Path::new("/tmp/out.mp4"),
@@ -1101,14 +1723,17 @@ mod tests {
             SegmentWindow {
                 start_seconds: 10.0,
                 duration_seconds: 6.0,
+                pool: SegmentPool::Stratified,
             },
             SegmentWindow {
                 start_seconds: 12.3,
                 duration_seconds: 6.0,
+                pool: SegmentPool::Stratified,
             },
             SegmentWindow {
                 start_seconds: 50.0,
                 duration_seconds: 6.0,
+                pool: SegmentPool::Stratified,
             },
         ];
         let aligned = align_windows_to_keyframes(&windows, &[0.0, 11.8, 48.0, 96.0], 100.0);
@@ -1132,5 +1757,131 @@ mod tests {
         assert_eq!(low, 8000);
         assert_eq!(target, 9500);
         assert!(high > target);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies packet header CSV parsing and Dual-Pool stratified/risk planning without overlap; returns nothing; side effects: none.
+    fn parses_packet_samples_and_builds_dual_pool_plan() {
+        let parsed =
+            parse_packet_samples("0.000,12000,K__\nN/A,500,___\n-1.0,200,___\n0.500,4500,___\n");
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed[0].is_keyframe);
+        assert!(!parsed[1].is_keyframe);
+        assert_eq!(parsed[1].size_bytes, 4500);
+
+        // Construct 180s (~15 windows in [9s, 165s]) of synthetic packet pairs.
+        let mut src_pkts = Vec::new();
+        let mut dist_pkts = Vec::new();
+        for idx in 0..30 {
+            let pts = idx as f64 * 6.0 + 1.0;
+            let src_size = 50_000 + (idx as u64 % 10) * 10_000;
+            // Deliberately inject one extreme starvation window and one high spike.
+            let (src_size, dist_size) = if idx == 6 {
+                (120_000, 12_000) // lowest ratio R(t) = 0.10
+            } else if idx == 20 {
+                (500_000, 220_000) // highest source spike
+            } else {
+                (src_size, src_size / 2)
+            };
+            src_pkts.push(PacketSample {
+                pts_seconds: pts,
+                size_bytes: src_size,
+                is_keyframe: true,
+            });
+            dist_pkts.push(PacketSample {
+                pts_seconds: pts,
+                size_bytes: dist_size,
+                is_keyframe: true,
+            });
+        }
+
+        assert_eq!(dual_pool_plan(&src_pkts, &dist_pkts, 80.0), None);
+        let plan = dual_pool_plan(&src_pkts, &dist_pkts, 180.0).unwrap();
+        let pool_a: Vec<_> = plan
+            .iter()
+            .filter(|w| w.pool == SegmentPool::Stratified)
+            .collect();
+        let pool_b: Vec<_> = plan
+            .iter()
+            .filter(|w| w.pool == SegmentPool::Risk)
+            .collect();
+        assert!(!pool_a.is_empty() && pool_a.len() <= 6);
+        assert!(!pool_b.is_empty() && pool_b.len() <= 4);
+        assert!(
+            plan.windows(2)
+                .all(|pair| pair[0].start_seconds < pair[1].start_seconds)
+        );
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies libvmaf JSON frame extraction and collapse summary metrics (harmonic mean, P05, min, worst frame index); returns nothing; side effects: none.
+    fn parses_vmaf_json_and_summarizes_collapse() {
+        let mut frames_json = String::from("{\"version\":\"3.2.1\",\"frames\":[");
+        for idx in 0..20 {
+            let score = if idx == 13 { 30.0 } else { 96.0 };
+            if idx > 0 {
+                frames_json.push(',');
+            }
+            frames_json.push_str(&format!(
+                "{{\"frameNum\":{idx},\"metrics\":{{\"vmaf\":{score:.2}}}}}"
+            ));
+        }
+        frames_json.push_str("]}");
+
+        let parsed = parse_vmaf_json_frames(&frames_json);
+        assert_eq!(parsed.len(), 20);
+        let stats = summarize_frame_scores(&parsed).unwrap();
+        assert_eq!(stats.frame_count, 20);
+        assert_eq!(stats.worst_frame_index, 13);
+        assert_eq!(stats.min_hundredths, 3000);
+        assert_eq!(stats.p05_hundredths, 3000);
+        assert!(stats.mean_hundredths > 9000);
+        assert!(stats.harmonic_mean_hundredths < stats.mean_hundredths - 500);
+
+        let v1_json = r#"{"frames":[{"frameNum":4,"metrics":{"vmaf_v1":94.25}}]}"#;
+        assert_eq!(parse_vmaf_json_frames(v1_json), vec![(4, 94.25)]);
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies filter path escaping handles Windows backslashes, colons, and separators; returns nothing; side effects: none.
+    fn escapes_windows_and_posix_filter_paths() {
+        assert_eq!(
+            escape_filter_path(Path::new("C:\\tmp\\a.json")),
+            "C\\:/tmp/a.json"
+        );
+        assert_eq!(
+            escape_filter_path(Path::new("/var/tmp/clip,1.json")),
+            "/var/tmp/clip\\,1.json"
+        );
+    }
+
+    #[test]
+    // AI-FUNC-SUMMARY: Verifies HDR PQ sources route to `hdr_vmaf_v1.1.8` models and drop SDR caveats only when supported; returns nothing; side effects: none.
+    fn routes_hdr_pq_to_v1_when_supported() {
+        let sdr = video(1920, 1080, "yuv420p");
+        assert_eq!(model_for_with_support(&sdr, true), "vmaf_v0.6.1");
+        assert_eq!(accuracy_caveat_with_support(&sdr, true), None);
+
+        let mut pq_1080 = video(1920, 1080, "yuv420p10le");
+        pq_1080.color_transfer = Some("smpte2084".to_string());
+        assert_eq!(model_for_with_support(&pq_1080, false), "vmaf_v0.6.1");
+        assert!(accuracy_caveat_with_support(&pq_1080, false).is_some());
+        assert_eq!(
+            model_for_with_support(&pq_1080, true),
+            "hdr_vmaf_v1.1.8_3d0h"
+        );
+        assert_eq!(accuracy_caveat_with_support(&pq_1080, true), None);
+
+        let mut pq_4k = video(3840, 2160, "yuv420p10le");
+        pq_4k.color_transfer = Some("smpte2084".to_string());
+        assert_eq!(
+            model_for_with_support(&pq_4k, true),
+            "hdr_vmaf_v1.1.8_1d5h_2160"
+        );
+
+        let mut hlg = video(3840, 2160, "yuv420p10le");
+        hlg.color_transfer = Some("arib-std-b67".to_string());
+        assert_eq!(model_for_with_support(&hlg, true), "vmaf_4k_v0.6.1");
+        assert!(accuracy_caveat_with_support(&hlg, true).is_some());
     }
 }
